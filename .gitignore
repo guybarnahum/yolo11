@@ -12,6 +12,7 @@ output/
 
 # Mac OS
 .DS_Store
+
 # Distribution / packaging
 .Python
 build/

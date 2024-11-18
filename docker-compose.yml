@@ -13,5 +13,4 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
     restart: always
-    command: >
-      uvicorn main:app --host 0.0.0.0 --port 8080 --reload
+    command: python -u -m uvicorn main:app --host 0.0.0.0 --port 8080 --reload

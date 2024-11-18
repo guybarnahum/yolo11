@@ -7,7 +7,7 @@ def process_one_frame( frame, detect_model, track_model ):
     
     # initialize annotator for plotting masks
     annotator = Annotator(frame, line_width=2)  
-    results   = track_model.track(frame, persist=True) # object tracking
+    results   = track_model.track(frame, persist=True,verbose=False) # object tracking
         
     # check if tracks and masks are not None, then plot the masks on frame
     if results[0].boxes.id is not None and results[0].masks is not None:
@@ -25,11 +25,11 @@ def process_one_frame( frame, detect_model, track_model ):
 
 def setup_model( model_path, image_size ):
 
-    model = YOLO(model_path) 
+    model = YOLO(model_path,verbose=False) 
     return model
 
 def get_models(image_size=1088):
-    detect_model = YOLO("./models/yolo11n-seg.pt") 
+    detect_model = YOLO("./models/yolo11n-seg.pt",verbose=False) 
     track_model  = detect_model
 
     return detect_model, track_model

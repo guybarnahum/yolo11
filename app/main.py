@@ -5,6 +5,7 @@ from fastapi import BackgroundTasks, FastAPI
 from typing import Optional
 import os
 import time
+from tqdm import tqdm
 
 app = FastAPI()
 
@@ -39,31 +40,45 @@ def process_video(  detect_model,
                         cv2.VideoWriter_fourcc(*"MJPG"), fps, (w, h))
 
     # Position in video
-    start_frame = start_ms * fps / 1000 if start_ms else 0   
-    end_frame   = end_ms   * fps / 1000 if end_ms   else None
+    start_frame = int(start_ms * fps / 1000) if start_ms else 0   
+    end_frame   = int(end_ms   * fps / 1000) if end_ms   else None
+    frame_number= int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) 
+
+    if not end_frame or end_frame > frame_number:
+        end_frame = frame_number
 
     logging.debug(f"start_frame: {start_frame}, end_frame:{end_frame} ")
     
     cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
     frame_ix = start_frame
- 
+    frames_to_process = end_frame - start_frame
+    pct_frames = int(frames_to_process / 100) + 1
+
     # Loop over the video frames
+    # for frame_ix in tqdm(range(start_frame,end_frame)):
+    progress_bar = tqdm(total=frames_to_process)
+
     while not end_frame or frame_ix < end_frame :
         ret, im0 = cap.read()
         if not ret: break
 
         frame_ix = frame_ix + 1
-        logging.debug(f"frame: {frame_ix}")
-
+        if ( frame_ix % pct_frames == 0 ):
+            logging.info(f"{frame_ix}")
+        # logging.debug(f"frame: {frame_ix}")
+         
         if end_frame and frame_ix > end_frame   : break
 
         im0 = process_one_frame_func( im0, detect_model, track_model)
         out.write(im0)  # write the video frame as output 
 
+        progress_bar.update(1)
+        progress_bar.refresh()
+       
         # cv2.imshow("instance-segmentation-object-tracking", im0) # display
         # if cv2.waitKey(1) & 0xFF == ord("q"):
         #    break
-
+    progress_bar.close()
     out.release()  # release the video writer
     cap.release()  # release the video capture
     # cv2.destroyAllWindows() # destroy all opened windows

@@ -1,0 +1,6 @@
+fastapi
+lapx>=0.5.2
+opencv-python-headless
+sahi
+ultralytics
+uvicorn

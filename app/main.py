@@ -40,7 +40,7 @@ def process_video(  detect_model,
 
     # Position in video
     start_frame = start_ms * fps / 1000 if start_ms else 0   
-    end_frame = end_ms * fps / 1000 if start_ms else None
+    end_frame   = end_ms   * fps / 1000 if end_ms   else None
 
     logging.debug(f"start_frame: {start_frame}, end_frame:{end_frame} ")
     
@@ -97,7 +97,7 @@ usage = '''Usage : http://localhost:8080/process?config_name=yolo11_sliced&input
 @app.get("/")
 async def root():
     return { "message": usage }
-    
+
 
 @app.get("/process")
 async def trigger_background_task(

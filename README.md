@@ -13,7 +13,8 @@ Ensure you have the following installed on your system:
 ├── Dockerfile
 ├── app
 │   ├── main.py
-│   ├── yolo11.py          
+│   ├── yolo11l.py
+│   ├── yolo11n_seg.py     
 │   └── yolo11_sliced.py
 ├── docker-compose.yml
 ├── docker-restart.sh
@@ -23,6 +24,7 @@ Ensure you have the following installed on your system:
 ├── models
 │   ├── yolo11n-seg.pt
 │   ├── yolo11n.pt
+│   ├── yolo11l.pt
 │   └── yolov8n.pt
 ├── output
 │   ├── output_120_180.avi

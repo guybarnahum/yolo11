@@ -12,5 +12,6 @@ services:
       - "8080:8080"               # Expose FastAPI port
     environment:
       - PYTHONUNBUFFERED=1
+    tty: true
     restart: always
     command: python -u -m uvicorn main:app --host 0.0.0.0 --port 8080 --reload

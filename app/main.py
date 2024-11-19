@@ -5,7 +5,7 @@ from fastapi import BackgroundTasks, FastAPI
 from typing import Optional
 import os
 import time
-from tqdm import tqdm
+from tqdm import tqdm #select best for enviroment
 
 app = FastAPI()
 
@@ -63,8 +63,11 @@ def process_video(  detect_model,
         if not ret: break
 
         frame_ix = frame_ix + 1
+        
         if ( frame_ix % pct_frames == 0 ):
-            logging.info(f"{frame_ix}")
+            print("", end ="\n", flush=True)
+            #print(progress_bar, flush=True)
+        
         # logging.debug(f"frame: {frame_ix}")
          
         if end_frame and frame_ix > end_frame   : break
@@ -73,8 +76,7 @@ def process_video(  detect_model,
         out.write(im0)  # write the video frame as output 
 
         progress_bar.update(1)
-        progress_bar.refresh()
-       
+      
         # cv2.imshow("instance-segmentation-object-tracking", im0) # display
         # if cv2.waitKey(1) & 0xFF == ord("q"):
         #    break

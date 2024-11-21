@@ -13,7 +13,8 @@ Ensure you have the following installed on your system:
 ├── Dockerfile
 ├── app
 │   ├── main.py
-│   ├── yolo11.py          
+│   ├── yolo11l.py
+│   ├── yolo11n_seg.py     
 │   └── yolo11_sliced.py
 ├── docker-compose.yml
 ├── docker-restart.sh
@@ -23,6 +24,7 @@ Ensure you have the following installed on your system:
 ├── models
 │   ├── yolo11n-seg.pt
 │   ├── yolo11n.pt
+│   ├── yolo11l.pt
 │   └── yolov8n.pt
 ├── output
 │   ├── output_120_180.avi
@@ -77,7 +79,7 @@ http://localhost:8080/process?config_name=yolo11&input_path=./input/2024_10_29_T
 
 ### Query Parameters
 
-- **config_name**: The configuration to use (e.g., `yolo11`). This tells the system which model configuration to load.
+- **config_name**: The configuration to use (e.g., `yolo11l`,`yolo11_sliced` or `yolo11n_seg`). This tells the system which model configuration to load.
 - **input_path**: The relative path to the input file (video or image) located in the `input/` directory.
 - **output_path**: The relative path to the directory where processed files should be saved. Typically set to `./output`.
 - **image_size**: The resolution to which the input frames should be resized (e.g., 1088).

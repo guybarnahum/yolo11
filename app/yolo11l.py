@@ -6,11 +6,14 @@ import json
 
 def process_one_frame( frame, detect_model, track_model ):
     
+    class_codes = [0,1,2,3,4,5,6,7,8]
+
     # initialize annotator for plotting masks
     annotator = Annotator(frame, line_width=2)  
     
     # object tracking
     results   = track_model.track(  frame, 
+                                    classes=class_codes,
                                     persist=True,
                                     verbose=False,
                                     #tracker="bytetrack.yaml"

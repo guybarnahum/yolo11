@@ -7,10 +7,10 @@ import os
 import time
 from tqdm import tqdm #select best for enviroment
 
-app = FastAPI()
+from compress_video import compress_video_to_size, compress_video_to_bitrate, get_bitrate, calculate_bit_rate
+from yolo_classes import get_yolo_classes
 
-from ultralytics import YOLO
-from ultralytics.utils.plotting import Annotator, colors
+app = FastAPI()
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
@@ -36,8 +36,7 @@ def process_video(  detect_model,
                                         cv2.CAP_PROP_FRAME_HEIGHT, 
                                         cv2.CAP_PROP_FPS))
 
-    out = cv2.VideoWriter( f"{output_path}/output.avi", 
-                        cv2.VideoWriter_fourcc(*"MJPG"), fps, (w, h))
+    out = cv2.VideoWriter( output_path, cv2.VideoWriter_fourcc(*"MJPG"), fps, (w, h))
 
     # Position in video
     start_frame = int(start_ms * fps / 1000) if start_ms else 0   
@@ -84,6 +83,28 @@ def process_video(  detect_model,
     out.release()  # release the video writer
     cap.release()  # release the video capture
     # cv2.destroyAllWindows() # destroy all opened windows
+    
+def run_compress_video(input_path, output_path, size_upper_bound = 0, bitrate = 0):
+    """
+    Background task to run the compress_video function.
+    """
+    try:
+        # Run the video processing function
+        path, extension = os.path.splitext(output_path)
+        extension = '.mp4'
+        output_mp4_path = path + extension
+        if size_upper_bound:
+            output_file_path = compress_video_to_size(input_path, output_mp4_path, size_upper_bound)
+        elif bitrate:
+            output_file_path = compress_video_to_bitrate(input_path, output_mp4_path, bitrate, 0)
+        else:
+            logging.error("Error: run_compress_video - no size or bitrate provided")
+
+        logging.info("Video compression completed - {output_file_path}.")
+
+    except Exception as e:
+        logging.error(f"Error during video compression: {e}")
+        traceback.print_exc()
 
 
 def run_process_video(config_name, input_path, output_path, start_ms=0, end_ms=None, image_size=1088):
@@ -91,6 +112,18 @@ def run_process_video(config_name, input_path, output_path, start_ms=0, end_ms=N
     Background task to run the process_video function.
     """
     try:
+        if os.path.isdir(output_path):
+            output_path = os. path. normpath(output_path) + "/output.mp4"
+
+        path, extension = os.path.splitext(output_path)
+        
+        print(f"path: {path} extension: {extension}")
+
+        target = ".avi" if extension == ".avi" else ".mp4"
+        output_path = path + ".avi"
+       
+        logging.info(f"target {target} output_path {output_path}")
+
         # Dynamically import the specified config module
         config = importlib.import_module(config_name)
         logging.info(f'Config {config_name} loaded successfully.')
@@ -101,9 +134,29 @@ def run_process_video(config_name, input_path, output_path, start_ms=0, end_ms=N
 
         # Run the video processing function
         process_video(detect_model, track_model, process_one_frame, input_path, output_path, start_ms, end_ms)
+
+        if target == ".mp4": 
+            video_bitrate, audio_bitrate = get_bitrate(input_path)
+        
+            if  video_bitrate < 2 * 1024 * 1024:
+                video_bitrate = 2 * 1024 * 1024
+
+            logging.info(f"bitrate video:{video_bitrate} audio:{audio_bitrate}")
+
+            path, extension = os.path.splitext(output_path)
+            extension = '.mp4'
+            output_mp4_path = path + extension
+            output_mp4_path = compress_video_to_bitrate(output_path, output_mp4_path, video_bitrate, audio_bitrate)
+
+            if (output_mp4_path):
+                logging.info(f"removing {output_path}")
+                os.remove(output_path)
+                logging.info(f"keeping  {output_mp4_path}")
+
         logging.info("Video processing completed.")
     except Exception as e:
         logging.error(f"Error during video processing: {e}")
+
 
 usage = '''Usage : http://localhost:8080/process?config_name=yolo11_sliced&input_path=./input/videoplayback.mp4&output_path=./output&start_ms=180000&end_ms=182000&image_size=1088
         Supported configurations : yolo11_sliced | yolo11
@@ -116,8 +169,56 @@ async def root():
     return { "message": usage }
 
 
+@app.get("/classes")
+async def yolo_classes():
+    return get_yolo_classes()
+
+
+@app.get("/bitrate")
+async def bitrate(input_path: str):
+    """
+    """
+    video_bitrate, audio_bitrate, streams = get_bitrate(input_path)
+    return { "video_bitrate": video_bitrate, "audio_bitrate" : audio_bitrate, "streams" : streams }
+
+
+@app.get("/compress")
+async def compress_video(
+    background_tasks: BackgroundTasks,
+    input_path: str,
+    output_path: str,
+    size: Optional[int] = 0,
+    bitrate: Optional[int] = 0,
+):
+    """
+    Endpoint to start video compression as a background task using a GET request.
+    """
+    if not size and not bitrate:
+        return  {"error": f"please specify not to exceed size or bitrate"}
+
+    # Validate the input path
+    if not os.path.exists(input_path):
+        return {"error": f"Input file not found: {input_path}"}
+
+    # Ensure the output directory exists
+    output_dir = os.path.dirname(output_path)
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir, exist_ok=True)
+    
+     # Add the background task
+    background_tasks.add_task(
+        run_compress_video,
+        input_path,
+        output_path,
+        size,
+        bitrate
+    )
+
+    return {"message": "Video processing started in the background"}
+
+
 @app.get("/process")
-async def trigger_background_task(
+async def process_video_in_background(
     background_tasks: BackgroundTasks,
     config_name: str,
     input_path: str,
@@ -134,8 +235,9 @@ async def trigger_background_task(
         return {"error": f"Input file not found: {input_path}"}
     
     # Ensure the output directory exists
-    if not os.path.exists(output_path):
-        os.makedirs(output_path, exist_ok=True)
+    output_dir = os.path.dirname(output_path)
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir, exist_ok=True)
 
     # Add the background task
     background_tasks.add_task(

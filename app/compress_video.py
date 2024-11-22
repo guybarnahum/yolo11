@@ -7,7 +7,7 @@ def get_bitrate(input_path):
 
     probe = ffmpeg.probe(input_path)
     
-    print(probe['streams'])
+    #print(probe['streams'])
 
     audio_stream = next((s for s in probe['streams'] if s['codec_type'] == 'audio'), None)
     audio_bitrate = int(audio_stream['bit_rate']) if audio_stream else 0
@@ -79,14 +79,15 @@ def compress_video_to_bitrate(input_path, output_path, video_bitrate, audio_bitr
         if two_pass:
             ffmpeg.output(i, os.devnull,
                           **{'c:v': 'libx264', 'b:v': video_bitrate, 'pass': 1, 'f': 'mp4'}
-                          ).overwrite_output().run()
+                          ).global_args('-nostats', '-loglevel', 'warning').overwrite_output().run()
+
             ffmpeg.output(i, output_path,
                           **{'c:v': 'libx264', 'b:v': video_bitrate, 'pass': 2, 'c:a': 'aac', 'b:a': audio_bitrate}
-                          ).overwrite_output().run()
+                          ).global_args('-nostats', '-loglevel', 'warning').overwrite_output().run()
         else:
             ffmpeg.output(i, output_path,
                           **{'c:v': 'libx264', 'b:v': video_bitrate, 'c:a': 'aac', 'b:a': audio_bitrate}
-                          ).overwrite_output().run()
+                          ).global_args('-nostats', '-loglevel', 'warning').overwrite_output().run()
 
         return output_path
 

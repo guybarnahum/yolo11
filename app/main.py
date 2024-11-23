@@ -9,6 +9,7 @@ from tqdm import tqdm #select best for enviroment
 
 from compress_video import compress_video_to_size, compress_video_to_bitrate, get_bitrate, calculate_bit_rate
 from yolo_classes import get_yolo_classes
+from yolo11 import setup_model, process_one_frame
 
 app = FastAPI()
 
@@ -16,13 +17,22 @@ logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(leve
 
 import traceback
 
-def process_video(  detect_model, 
-                    track_model, 
+def process_video(  model_path, 
                     process_one_frame_func, 
                     input_path, 
                     output_path, 
+                    tracker = None,
+                    tile = None, 
                     start_ms = 0, 
-                    end_ms = None):
+                    end_ms = None,
+                    image_size=1088):
+    """
+    Main video processing process
+    """
+
+    # Load models from the config
+    detect_model, tile_model = setup_model(model_path, tile, image_size=image_size)
+    logging.info( f"detect-model :{model_path} tile {tile}")
 
     # Video capture
     try:
@@ -71,7 +81,7 @@ def process_video(  detect_model,
          
         if end_frame and frame_ix > end_frame   : break
 
-        im0 = process_one_frame_func( im0, detect_model, track_model)
+        im0 = process_one_frame_func( im0, detect_model, tile_model, tracker, tile)
         out.write(im0)  # write the video frame as output 
 
         progress_bar.update(1)
@@ -79,11 +89,13 @@ def process_video(  detect_model,
         # cv2.imshow("instance-segmentation-object-tracking", im0) # display
         # if cv2.waitKey(1) & 0xFF == ord("q"):
         #    break
+
     progress_bar.close()
     out.release()  # release the video writer
     cap.release()  # release the video capture
     # cv2.destroyAllWindows() # destroy all opened windows
     
+
 def run_compress_video(input_path, output_path, size_upper_bound = 0, bitrate = 0):
     """
     Background task to run the compress_video function.
@@ -107,7 +119,7 @@ def run_compress_video(input_path, output_path, size_upper_bound = 0, bitrate = 
         traceback.print_exc()
 
 
-def run_process_video(config_name, input_path, output_path, start_ms=0, end_ms=None, image_size=1088):
+def run_process_video(model_path, input_path, output_path, tracker=None, tile=None, start_ms=0, end_ms=None, image_size=1088):
     """
     Background task to run the process_video function.
     """
@@ -117,23 +129,20 @@ def run_process_video(config_name, input_path, output_path, start_ms=0, end_ms=N
 
         path, extension = os.path.splitext(output_path)
         
-        print(f"path: {path} extension: {extension}")
+        logging.info(f"path: {path} extension: {extension}")
 
         target = ".avi" if extension == ".avi" else ".mp4"
         output_path = path + ".avi"
        
         logging.info(f"target {target} output_path {output_path}")
-
-        # Dynamically import the specified config module
-        config = importlib.import_module(config_name)
-        logging.info(f'Config {config_name} loaded successfully.')
-
-        # Load models from the config
-        detect_model, track_model = config.get_models(image_size=image_size)
-        process_one_frame = config.process_one_frame
+        logging.info(f"tracker {tracker} tile {tile}")
 
         # Run the video processing function
-        process_video(detect_model, track_model, process_one_frame, input_path, output_path, start_ms, end_ms)
+        process_video(  model_path, process_one_frame, 
+                        input_path, output_path, 
+                        tracker, tile, 
+                        start_ms, end_ms,
+                        image_size)
 
         if target == ".mp4": 
             video_bitrate, audio_bitrate = get_bitrate(input_path)
@@ -171,12 +180,16 @@ async def root():
 
 @app.get("/classes")
 async def yolo_classes():
+    """
+    Endpoint to return COCO dataset class names using a GET request.
+    """
     return get_yolo_classes()
 
 
 @app.get("/bitrate")
 async def bitrate(input_path: str):
     """
+    Endpoint to return video bitrate using a GET request.
     """
     video_bitrate, audio_bitrate, streams = get_bitrate(input_path)
     return { "video_bitrate": video_bitrate, "audio_bitrate" : audio_bitrate, "streams" : streams }
@@ -194,7 +207,7 @@ async def compress_video(
     Endpoint to start video compression as a background task using a GET request.
     """
     if not size and not bitrate:
-        return  {"error": f"please specify not to exceed size or bitrate"}
+        return  {"error": "please specify not-to-exceed-size or bitrate"}
 
     # Validate the input path
     if not os.path.exists(input_path):
@@ -220,11 +233,15 @@ async def compress_video(
 @app.get("/process")
 async def process_video_in_background(
     background_tasks: BackgroundTasks,
-    config_name: str,
+    model_path: str,
     input_path: str,
     output_path: str,
+    tracker: Optional[str] = None,
+    tile: Optional[int] = None,
     start_ms: Optional[int] = 0,
     end_ms: Optional[int] = None,
+    start: Optional(int) = 0,
+    end: Optional(int) = None,
     image_size: Optional[int] = 1088
 ):
     """
@@ -239,12 +256,18 @@ async def process_video_in_background(
     if not os.path.exists(output_dir):
         os.makedirs(output_dir, exist_ok=True)
 
+    # overwrite ms is sec is provided
+    start_ms = start * 1_000 if start is not 0     else start_ms
+    end_ms   = end   * 1_000 if end   is not None  else end_ms
+
     # Add the background task
     background_tasks.add_task(
         run_process_video,
-        config_name,
+        model_path,
         input_path,
         output_path,
+        tracker,
+        tile,
         start_ms,
         end_ms,
         image_size
@@ -252,7 +275,6 @@ async def process_video_in_background(
 
     return {"message": "Video processing started in the background"}
 
-# http://localhost:8000/process?config_name=yolo11_sliced&input_path=./input/videoplayback.mp4&output_path=./output&start_ms=180000&end_ms=182000&image_size=1088
 
 if __name__ == "__main__":
     import uvicorn

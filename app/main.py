@@ -1,7 +1,10 @@
 import cv2
 import importlib
 import logging
+
 from fastapi import BackgroundTasks, FastAPI
+import fiftyone as fo
+
 from typing import Optional
 import os
 import time
@@ -17,83 +20,114 @@ logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(leve
 
 import traceback
 
-def process_video(  model_path, 
-                    process_one_frame_func, 
-                    input_path, 
-                    output_path, 
-                    tracker = None,
-                    tile = None, 
-                    start_ms = 0, 
-                    end_ms = None,
-                    image_size=1088):
+def build_name( base_path, model_path, tracker, tile ):
+    
+    base_name  = os.path.basename(base_path )    # remove path - keep base name
+    base_name  = os.path.splitext(base_name)[0] # remove extension
+
+    model_name = os.path.basename(model_path)    # remove path - keep base name
+    model_name = os.path.splitext(model_name)[0] # remove extension
+
+    tracker_name = os.path.splitext(tracker)[0]  # remove extension
+
+    name_parts = [base_name, model_name, tracker_name, tile ]
+    name_parts = [part for part in name_parts if part ]
+    name = '_'.join([str(part) for part in name_parts])
+
+    return name
+
+
+def process_video(model_path, process_one_frame_func, input_path, output_path, 
+                  tracker=None, tile=None, start_ms=0, end_ms=None, image_size=1088):
     """
     Main video processing process
     """
+ 
+    # Check if the dataset exists, otherwise create an empty video dataset
+    dataset_dir = "/app/output/dataset"
+    dataset_type=fo.types.FiftyOneVideoLabelsDataset
 
+    try:
+        dataset = fo.Dataset.from_dir( dataset_dir=dataset_dir, dataset_type=dataset_type)
+    except Exception as e:
+        logging.error(f"Exception: {str(e)}")
+        dataset = None
+
+    if not dataset:
+        dataset = fo.Dataset()
+        dataset.media_type = "video" 
+        dataset.persistent = True
+        # Define the schema for frame-level fields
+        dataset.add_frame_field("detections", fo.EmbeddedDocumentField, embedded_doc_type=fo.Detections)
+        logging.info(f"dataset created")
+
+    model_label = build_name( 'model', model_path, tracker, tile )
+    if model_label not in dataset.get_frame_field_schema().keys():
+        dataset.add_frame_field(model_label, fo.EmbeddedDocumentField, embedded_doc_type=fo.Detections)
+        logging.info(f"Dynamic frame field '{model_label}' added to the schema")
+
+    sample = fo.Sample(filepath=input_path)
+   
     # Load models from the config
     detect_model, tile_model = setup_model(model_path, tile, image_size=image_size)
-    logging.info( f"detect-model :{model_path} tile {tile}")
+    logging.info(f"detect-model: {model_path}, tile: {tile}")
 
     # Video capture
-    try:
-        cap = cv2.VideoCapture(input_path)
-    except Exception as e:
-        logger.error(f'An error occurred: {e}')
-        return 
+    cap = cv2.VideoCapture(input_path)
+    if not cap.isOpened():
+        logger.error("Failed to open input video")
+        return
 
     # Video writer
     w, h, fps = (int(cap.get(x)) for x in (cv2.CAP_PROP_FRAME_WIDTH, 
-                                        cv2.CAP_PROP_FRAME_HEIGHT, 
-                                        cv2.CAP_PROP_FPS))
+                                           cv2.CAP_PROP_FRAME_HEIGHT, 
+                                           cv2.CAP_PROP_FPS))
+    out = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*"MJPG"), fps, (w, h))
 
-    out = cv2.VideoWriter( output_path, cv2.VideoWriter_fourcc(*"MJPG"), fps, (w, h))
-
-    # Position in video
+    # Frame calculations
     start_frame = int(start_ms * fps / 1000) if start_ms else 0   
-    end_frame   = int(end_ms   * fps / 1000) if end_ms   else None
-    frame_number= int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) 
+    end_frame = int(end_ms * fps / 1000) if end_ms else int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-    if not end_frame or end_frame > frame_number:
-        end_frame = frame_number
-
-    logging.debug(f"start_frame: {start_frame}, end_frame:{end_frame} ")
-    
-    cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
-    frame_ix = start_frame
     frames_to_process = end_frame - start_frame
-    pct_frames = int(frames_to_process / 100) + 1
-
-    # Loop over the video frames
-    # for frame_ix in tqdm(range(start_frame,end_frame)):
     progress_bar = tqdm(total=frames_to_process)
+    one_percent  = int(frames_to_process / 100) + 1
 
-    while not end_frame or frame_ix < end_frame :
+    logging.info(f"{frames_to_process} from [{start_frame}..{end_frame}]")
+    logging.info(f"one_percent : {one_percent}")
+
+    cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+
+    for frame_ix in range(start_frame, end_frame):
         ret, im0 = cap.read()
-        if not ret: break
-
-        frame_ix = frame_ix + 1
+        if not ret:
+            break
         
-        if ( frame_ix % pct_frames == 0 ):
-            print("", end ="\n", flush=True)
-            #print(progress_bar, flush=True)
+        im0, detections_list = process_one_frame_func(im0, detect_model, tile_model, tracker, tile)
+        out.write(im0)
+   
+        detections_obj = fo.Detections(detections=detections_list)    
+        frame_obj = fo.Frame(detections=detections_obj)
+      
+        sample.frames[ frame_ix + 1 ][ model_label ] = detections_obj
         
-        # logging.debug(f"frame: {frame_ix}")
-         
-        if end_frame and frame_ix > end_frame   : break
-
-        im0 = process_one_frame_func( im0, detect_model, tile_model, tracker, tile)
-        out.write(im0)  # write the video frame as output 
+        if frame_ix % one_percent == 0:
+            print(".")
 
         progress_bar.update(1)
-      
-        # cv2.imshow("instance-segmentation-object-tracking", im0) # display
-        # if cv2.waitKey(1) & 0xFF == ord("q"):
-        #    break
+    
+    # Add the sample to the dataset and save
+    dataset.add_sample(sample)
+    sample.save()
+
+    dataset.export(
+        export_dir=dataset_dir,
+        dataset_type=dataset_type,
+    )
 
     progress_bar.close()
-    out.release()  # release the video writer
-    cap.release()  # release the video capture
-    # cv2.destroyAllWindows() # destroy all opened windows
+    out.release()
+    cap.release()
+
     
 
 def run_compress_video(input_path, output_path, size_upper_bound = 0, bitrate = 0):
@@ -123,14 +157,15 @@ def run_process_video(model_path, input_path, output_path, tracker=None, tile=No
     """
     Background task to run the process_video function.
     """
+    if not tracker: tracker="botsort.yaml"
+
     try:
         if os.path.isdir(output_path):
-            output_path = os. path. normpath(output_path) + "/output.mp4"
+            output_name = build_name(input_path, model_path, tracker, tile )
+            output_path = os.path.normpath(output_path) + '/' + output_name + '.mp4'
 
         path, extension = os.path.splitext(output_path)
         
-        logging.info(f"path: {path} extension: {extension}")
-
         target = ".avi" if extension == ".avi" else ".mp4"
         output_path = path + ".avi"
        
@@ -165,6 +200,7 @@ def run_process_video(model_path, input_path, output_path, tracker=None, tile=No
         logging.info("Video processing completed.")
     except Exception as e:
         logging.error(f"Error during video processing: {e}")
+        traceback.print_exc()
 
 
 usage = '''Usage : http://localhost:8080/process?config_name=yolo11_sliced&input_path=./input/videoplayback.mp4&output_path=./output&start_ms=180000&end_ms=182000&image_size=1088
@@ -240,8 +276,8 @@ async def process_video_in_background(
     tile: Optional[int] = None,
     start_ms: Optional[int] = 0,
     end_ms: Optional[int] = None,
-    start: Optional(int) = 0,
-    end: Optional(int) = None,
+    start: Optional[int] = 0,
+    end: Optional[int] = None,
     image_size: Optional[int] = 1088
 ):
     """
@@ -257,7 +293,7 @@ async def process_video_in_background(
         os.makedirs(output_dir, exist_ok=True)
 
     # overwrite ms is sec is provided
-    start_ms = start * 1_000 if start is not 0     else start_ms
+    start_ms = start * 1_000 if start != 0         else start_ms
     end_ms   = end   * 1_000 if end   is not None  else end_ms
 
     # Add the background task

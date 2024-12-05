@@ -1,3 +1,9 @@
+import fiftyone as fo
+
+from fiftyone.core.labels import Detections, Detection
+import fiftyone.utils.ultralytics as fou
+
+import json
 from ultralytics import YOLO
 from ultralytics.utils.plotting import Annotator, colors
 import logging
@@ -51,12 +57,19 @@ def annotate_frame(frame, results):
 
 
 def process_one_frame( frame, detect_model, tile_model, tracker, tile ):
-    
+
+    # 0: "person"
+    # 1: "bicycle"
+    # 2: "car"
+    # 3: "motorcycle"
+    # 4: "airplane"
+    # 5: "bus"
+    # 6: "train"
+    # 7: "truck"
+    # 8: "boat"
+
     class_codes = [0,1,2,3,4,5,6,7,8]
  
-    if not tracker: 
-        tracker="botsort.yaml"
-
     if tile:
          # Get sliced predictions
         result = get_sliced_prediction( image=frame, detection_model=tile_model,
@@ -74,8 +87,20 @@ def process_one_frame( frame, detect_model, tile_model, tracker, tile ):
 
     #print(json.dumps(results.__dict__,indent=2))
     frame = annotate_frame(frame, results)
+  
+    # Convert YOLO results to FiftyOne Detections
+    flatten_results = []
+
+    for result in results:
+        flatten_results.extend( result )
+        
+    detections_obj = fou.to_detections(flatten_results)
     
-    return frame
+    detections_list = []
+    for d in detections_obj:
+        detections_list.extend(d.detections)
+
+    return frame, detections_list
 
 
 def setup_model(model_path, tile=None, image_size=1088):

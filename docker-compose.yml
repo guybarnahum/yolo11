@@ -15,3 +15,31 @@ services:
     tty: true
     restart: always
     command: python -u -m uvicorn main:app --host 0.0.0.0 --port 8080 --reload
+    depends_on:
+      - fiftyone
+
+  fiftyone:
+    build:
+      context: .
+      dockerfile: Dockerfile_fiftyone
+    volumes:
+      - ./fiftyone_output:/app/fiftyone_output  # Use a separate volume for FiftyOne
+      - ./output:/app/output                    # Map output directory
+    ports:
+      - "5151:5151"
+    environment:
+      - FIFTYONE_DATABASE_URI=mongodb://mongo:27017
+    command: python /app/fiftyone_app.py
+    depends_on:
+      - mongo
+
+  mongo:
+    image: mongo:latest
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db   # Correct path for MongoDB
+    command: mongod --quiet --logpath /dev/null 
+
+volumes:
+  mongo-data:

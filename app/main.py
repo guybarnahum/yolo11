@@ -20,25 +20,20 @@ logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(leve
 
 import traceback
 
-def build_name( base_path, model_path, tracker, tile ):
-    
-    base_name  = os.path.basename(base_path )    # remove path - keep base name
-    base_name  = os.path.splitext(base_name)[0] # remove extension
+def build_name( name_parts, base_name = True ): 
+        
+    name_parts = [str(part) for part in name_parts if part ]
+    if base_name:
+        name_parts = [ os.path.basename(part)    for part in name_parts if part ]
+        name_parts = [ os.path.splitext(part)[0] for part in name_parts if part ]
 
-    model_name = os.path.basename(model_path)    # remove path - keep base name
-    model_name = os.path.splitext(model_name)[0] # remove extension
-
-    tracker_name = os.path.splitext(tracker)[0]  # remove extension
-
-    name_parts = [base_name, model_name, tracker_name, tile ]
-    name_parts = [part for part in name_parts if part ]
     name = '_'.join([str(part) for part in name_parts])
 
     return name
 
 
 def process_video(model_path, process_one_frame_func, input_path, output_path, 
-                  tracker=None, tile=None, start_ms=0, end_ms=None, image_size=1088):
+                  tracker=None, tile=None, start_ms=None, end_ms=None, image_size=1088):
     """
     Main video processing process
     """
@@ -61,10 +56,8 @@ def process_video(model_path, process_one_frame_func, input_path, output_path,
         dataset.add_frame_field("detections", fo.EmbeddedDocumentField, embedded_doc_type=fo.Detections)
         logging.info(f"dataset created")
 
-    model_label = build_name( 'model', model_path, tracker, tile )
-    if model_label not in dataset.get_frame_field_schema().keys():
-        dataset.add_frame_field(model_label, fo.EmbeddedDocumentField, embedded_doc_type=fo.Detections)
-        logging.info(f"Dynamic frame field '{model_label}' added to the schema")
+    model_label = build_name( [ 'model', model_path, tracker, tile ] )
+    logging.info(f"model_label {model_label}")
 
     sample = fo.Sample(filepath=input_path)
    
@@ -105,10 +98,13 @@ def process_video(model_path, process_one_frame_func, input_path, output_path,
         im0, detections_list = process_one_frame_func(im0, detect_model, tile_model, tracker, tile)
         out.write(im0)
    
+        for detection in detections_list:
+            detection.label = model_label
+
         detections_obj = fo.Detections(detections=detections_list)    
         frame_obj = fo.Frame(detections=detections_obj)
       
-        sample.frames[ frame_ix + 1 ][ model_label ] = detections_obj
+        sample.frames[ frame_ix + 1 ] = frame_obj
         
         if frame_ix % one_percent == 0:
             print(".")
@@ -153,7 +149,7 @@ def run_compress_video(input_path, output_path, size_upper_bound = 0, bitrate = 
         traceback.print_exc()
 
 
-def run_process_video(model_path, input_path, output_path, tracker=None, tile=None, start_ms=0, end_ms=None, image_size=1088):
+def run_process_video(model_path, input_path, output_path, tracker=None, tile=None, start_ms=None, end_ms=None, image_size=1088):
     """
     Background task to run the process_video function.
     """
@@ -161,7 +157,10 @@ def run_process_video(model_path, input_path, output_path, tracker=None, tile=No
 
     try:
         if os.path.isdir(output_path):
-            output_name = build_name(input_path, model_path, tracker, tile )
+            start = round( start_ms / 1_000, 2) if start_ms else None
+            end   = round( end_ms   / 1_000, 2) if end_ms   else None
+
+            output_name = build_name([input_path, model_path, tracker, tile, start, end] )
             output_path = os.path.normpath(output_path) + '/' + output_name + '.mp4'
 
         path, extension = os.path.splitext(output_path)

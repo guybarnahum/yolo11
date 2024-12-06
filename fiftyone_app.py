@@ -24,9 +24,13 @@ logging.warning(f"Loaded dataset: {dataset}")
 logging.warning(dataset.get_field_schema())
 logging.warning(dataset.get_frame_field_schema()) 
 
+# Create a custom App config
+app_config = fo.app_config.copy()
+app_config.color_by = "instance"
+
 # Launch FiftyOne session
 global session
-session = fo.launch_app(dataset)
+session = fo.launch_app(dataset, config=app_config)
 
 # File system event handler
 class DatasetChangeHandler(FileSystemEventHandler):

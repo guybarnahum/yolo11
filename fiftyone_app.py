@@ -1,4 +1,6 @@
 import fiftyone as fo
+from fiftyone import ViewField as F
+
 import logging
 import time
 from watchdog.observers import Observer
@@ -19,18 +21,29 @@ dataset = fo.Dataset.from_dir(
     overwrite=True
 )
 
-# Print available fields in the dataset
-logging.warning(f"Loaded dataset: {dataset}")
-logging.warning(dataset.get_field_schema())
-logging.warning(dataset.get_frame_field_schema()) 
-
 # Create a custom App config
 app_config = fo.app_config.copy()
 app_config.color_by = "instance"
 
 # Launch FiftyOne session
 global session
-session = fo.launch_app(dataset, config=app_config)
+
+# Set up clip view
+clips = dataset.to_clips("frames.detections")
+clips.compute_metadata()
+
+# Notice: compute metadata above sets metadata.total_frame_count to the original video frame count, 
+# and not the clip frame count(!)
+# Need to fix it so we can filter based on metadata.total_frame_count
+for index, clip in enumerate(clips):
+    clip_frames = len(clip.frames)
+    clip.metadata.total_frame_count = len(clip.frames)
+    clip.save()  # Save changes to the clip
+
+# Filter clips with at least 10 frames
+view = clips.match(F("metadata.total_frame_count") >= 60)
+session = fo.launch_app(view, config=app_config)
+# session.view = clips
 
 # File system event handler
 class DatasetChangeHandler(FileSystemEventHandler):

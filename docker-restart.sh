@@ -5,7 +5,7 @@ set -x
 
 # Stop and remove Docker containers managed by docker-compose
 echo "Stopping containers..."
-docker-compose down
+docker-compose down --volumes
 
 # Prune unused images
 echo "Pruning unused Docker images..."

@@ -11,26 +11,38 @@ Ensure you have the following installed on your system:
 ## Project Structure
 <pre>
 ├── Dockerfile
+├── Dockerfile_fiftyone
+├── README.md
 ├── app
+│   ├── compress_video.py
 │   ├── main.py
-│   ├── yolo11l.py
-│   ├── yolo11n_seg.py     
-│   └── yolo11_sliced.py
+│   ├── yolo11.py
+│   └── yolo_classes.py
 ├── docker-compose.yml
 ├── docker-restart.sh
+├── fiftyone_app.py
 ├── input
 │   ├── 2024_10_29_TD2eeqFV_b246bddda14e6e760189eea14480b3f8_flight-TD2eeqFV_0.mp4
-│   └── videoplayback.mp4
+│   └── overlapping_walks.mp4
 ├── models
-│   ├── yolo11n-seg.pt
-│   ├── yolo11n.pt
 │   ├── yolo11l.pt
+│   ├── yolo11n-seg.pt
+│   ├── yolo11n-visdrone.pt
+│   ├── yolo11n.pt
+│   ├── yolo11s.pt
 │   └── yolov8n.pt
 ├── output
-│   ├── output_120_180.avi
-│   ├── output_15_60.avi
-│   ├── output_180_240.avi
-│   └── output_60_120.avi
+│   ├── dataset
+│   │   ├── data
+│   │   │   ├── overlapping_walks.mp4
+│   │   │   └── 2024_10_29_TD2eeqFV_b246bddda14e6e760189eea14480b3f8_flight-TD2eeqFV_0.mp4
+│   │   ├── labels
+│   │   │   ├── overlapping_walks.json
+│   │   │   └── 2024_10_29_TD2eeqFV_b246bddda14e6e760189eea14480b3f8_flight-TD2eeqFV_0.json
+│   │   └── manifest.json
+│   ├── overlapping_walks_yolo11n_seg.mp4
+│   ├── overlapping_walks_yolo11n.mp4
+│   └── overlapping_walks_yolo11s_botsort.mp4
 └── requirements.txt
  </pre>
  
@@ -79,29 +91,34 @@ http://localhost:8080/process?config_name=yolo11&input_path=./input/2024_10_29_T
 
 ### Query Parameters
 
-- **config_name**: The configuration to use (e.g., `yolo11l`,`yolo11_sliced` or `yolo11n_seg`). This tells the system which model configuration to load.
-- **input_path**: The relative path to the input file (video or image) located in the `input/` directory.
-- **output_path**: The relative path to the directory where processed files should be saved. Typically set to `./output`.
-- **image_size**: The resolution to which the input frames should be resized (e.g., 1088).
-- **start_ms** (optional): The starting timestamp (in milliseconds) from where processing should begin.
-- **end_ms** (optional): The ending timestamp (in milliseconds) where processing should stop.
+- **model_path** (string): Path to the model file.
+- **input_path** (string): Path to the input video file.
+- **output_path** (string): Path to save the processed video, if a directory is used, output file name is generated
+- **tracker** (string, optional): yolo Tracker name (e.g., "botsort.yml").
+- **tile** (int, optional): Tile size for processing.
+- **start_ms** (int, optional): Start time in milliseconds.
+- **end_ms** (int, optional): End time in milliseconds.
+- **start** (int, optional): Start time in seconds (overrides start_ms).
+- **end** (int, optional): End time in seconds (overrides end_ms).
+- **image_size** (int, optional): Image size for model processing (default: 1088).
 
 ### Example Breakdown
 
 For the example URL:
+http://localhost:8080/process?model_path=./models/yolo11n.pt&input_path=./input/overlapping_walks.mp4&output_path=./output/&start=15&end=180
 
-http://localhost:8080/process?config_name=yolo11&input_path=./input/2024_10_29_TD2eeqFV_b246bddda14e6e760189eea14480b3f8_flight-TD2eeqFV_0.mp4&output_path=./output&image_size=1088&start_ms=180000&end_ms=240000
 
-- **Model**: `yolo11`
-- **Input file**: `input/2024_10_29_TD2eeqFV_b246bddda14e6e760189eea14480b3f8_flight-TD2eeqFV_0.mp4`
+- **model_path**: `./models/yolo11n.pt`
+- **input_path**: `input/overlapping_walks.mp4`
 - **Output directory**: `output/`
-- **Image size**: `1088`
-- **Start time**: `180000ms` (3 minutes)
-- **End time**: `240000ms` (4 minutes)
+- **Start time**: `15` (15 seconds)
+- **End time**: `180` (3 minutes)
 
 ### Viewing the Processed Output
 
-After processing, the output files (annotated videos or images) will be saved in the `output/` directory. You can view them using any standard media player.
+After processing, the output files (annotated videos or images) will be saved in the `output_path` directory as an mp4 file. You can view them using any standard media player.
+
+The video and detections are also added to output/dataset directory where `fiftyone` app is loading it as `yolo11_dataset`
 
 ## Cleanup
 

@@ -175,12 +175,19 @@ After processing, the output files (annotated videos or images) will be saved in
 
 The video and detections are also added to output/dataset directory where `fiftyone` app is loading it as `yolo11_dataset`
 
-## Cleanup
+
+## Cleanup hints
 
 To stop and remove all containers, networks, and volumes created by Docker Compose:
 
 ```bash
-docker-compose down --volumes
+> docker-compose down --volumes
+```
+
+To clean up also images:
+
+```bash
+> docker-compose down --volumes --rmi all
 ```
 
 

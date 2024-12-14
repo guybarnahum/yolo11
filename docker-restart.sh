@@ -10,7 +10,7 @@ docker-compose down --volumes
 
 # Prune unused images
 echo "Pruning unused Docker images..."
-docker image prune -f
+docker volume prune -f
 docker network prune -f
 
 # Start Docker containers

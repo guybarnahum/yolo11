@@ -99,7 +99,7 @@ def process_video(model_path, process_one_frame_func, input_path, output_path,
         out.write(im0)
    
         for detection in detections_list:
-            detection['model'] = model_label
+            detection.tags.append(model_label)
 
         detections_obj = fo.Detections(detections=detections_list)    
         frame_obj = fo.Frame(detections=detections_obj)

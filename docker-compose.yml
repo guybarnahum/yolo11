@@ -1,4 +1,5 @@
 services:
+
   fastapi:
     build:
       context: .
@@ -15,8 +16,6 @@ services:
     tty: true
     restart: always
     command: python -u -m uvicorn main:app --host 0.0.0.0 --port 8080 --reload
-    depends_on:
-      - fiftyone
 
   fiftyone:
     build:
@@ -29,6 +28,7 @@ services:
       - "5151:5151"
     environment:
       - FIFTYONE_DATABASE_URI=mongodb://mongo:27017
+      - FIFTYONE_LOGGING_LEVEL=INFO
     command: python /app/fiftyone_app.py
     depends_on:
       - mongo

@@ -71,14 +71,69 @@ To build the Docker container and start the service, use the provided `docker-re
 ### Explanation of `docker-restart.sh`
 
 The `docker-restart.sh` script performs the following steps:
-- Stops and removes any running containers for this project.
-- Builds the Docker image.
-- Restarts the container using `docker-compose`.
-
-Ensure the script has executable permissions:
+- Stops and removes any unused containers, volumes and netwroks.
+- Builds the Docker image if `resquirements.txt` was modified.
+- Restarts the container using `docker-compose` with the desired service `fastapi` or `fiftyone` or both (default)
 
 ```bash
-chmod +x docker-restart.sh
+> ./docker-restart.sh fiftyone
++ echo 'Stopping containers...'
+Stopping containers...
++ docker-compose down --volumes
+[+] Running 3/3
+ ✔ Container yolo11-tracker  Removed                                                                                                                                                 0.0s 
+ ✔ Volume yolo11_mongo-data  Removed                                                                                                                                                 0.0s 
+ ✔ Network yolo11_default    Removed                                                                                                                                                 0.1s 
++ echo 'Pruning unused Docker images...'
+Pruning unused Docker images...
++ docker image prune -f
+Total reclaimed space: 0B
++ docker network prune -f
++ echo 'Starting containers...'
+Starting containers...
+++ stat -f %m ./docker-restart.sh
++ last_run_time=1734175476
+++ stat -f %m requirements.txt
++ last_modified_requirements=1732552420
++ build=
++ '[' 1732552420 -gt 1734175476 ']'
++ docker-compose up fiftyone
+[+] Running 2/3
+ ✔ Network yolo11_default       Created                                                                                                                                              0.0s 
+ ✔ Volume "yolo11_mongo-data"   Created                                                                                                                                              0.0s 
+ ⠙ Container yolo11-mongo-1     Created                                                                                                                                              0.1s 
+ ⠋ Container yolo11-fiftyone-1  Created                                                                                                                                              0.1s 
+Attaching to fiftyone-1
+ 100% |███████████| 4/4 [37.5s elapsed, 0s remaining, 0.1 samples/s]    
+fiftyone-1  | Computing metadata...
+ 100% |███████| 224/224 [5.2s elapsed, 0s remaining, 49.2 samples/s]       
+fiftyone-1  | App launched. Point your web browser to http://localhost:5151
+fiftyone-1  | 
+fiftyone-1  | Welcome to
+fiftyone-1  | 
+fiftyone-1  | ███████╗██╗███████╗████████╗██╗   ██╗ ██████╗ ███╗   ██╗███████╗
+fiftyone-1  | ██╔════╝██║██╔════╝╚══██╔══╝╚██╗ ██╔╝██╔═══██╗████╗  ██║██╔════╝
+fiftyone-1  | █████╗  ██║█████╗     ██║    ╚████╔╝ ██║   ██║██╔██╗ ██║█████╗
+fiftyone-1  | ██╔══╝  ██║██╔══╝     ██║     ╚██╔╝  ██║   ██║██║╚██╗██║██╔══╝
+fiftyone-1  | ██║     ██║██║        ██║      ██║   ╚██████╔╝██║ ╚████║███████╗
+fiftyone-1  | ╚═╝     ╚═╝╚═╝        ╚═╝      ╚═╝    ╚═════╝ ╚═╝  ╚═══╝╚══════╝ v1.0.2
+fiftyone-1  | 
+fiftyone-1  | If you're finding FiftyOne helpful, here's how you can get involved:
+fiftyone-1  | 
+fiftyone-1  | |
+fiftyone-1  | |  ⭐⭐⭐ Give the project a star on GitHub ⭐⭐⭐
+fiftyone-1  | |  https://github.com/voxel51/fiftyone
+fiftyone-1  | |
+fiftyone-1  | |  🚀🚀🚀 Join the FiftyOne Slack community 🚀🚀🚀
+fiftyone-1  | |  https://slack.voxel51.com
+fiftyone-1  | |
+fiftyone-1  | 
+```
+
+Note: make sure the script has executable permissions:
+
+```bash
+> chmod +x docker-restart.sh
 ```
 
 ### Accessing the Processing Endpoint

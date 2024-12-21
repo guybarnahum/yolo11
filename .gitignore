@@ -6,6 +6,7 @@ __pycache__/
 # YOLO
 input/
 output/
+example/
 
 # C extensions
 *.so

@@ -153,14 +153,12 @@ def run_process_video(model_path, input_path, output_path, tracker=None, tile=No
     """
     Background task to run the process_video function.
     """
-    if not tracker: tracker="botsort.yaml"
-
     try:
         if os.path.isdir(output_path):
             start = round( start_ms / 1_000, 2) if start_ms else None
             end   = round( end_ms   / 1_000, 2) if end_ms   else None
 
-            output_name = build_name([input_path, model_path, tracker, tile, start, end] )
+            output_name = build_name([input_path, model_path, 'deepsort', tile, start, end])
             output_path = os.path.normpath(output_path) + '/' + output_name + '.mp4'
 
         path, extension = os.path.splitext(output_path)
@@ -169,19 +167,19 @@ def run_process_video(model_path, input_path, output_path, tracker=None, tile=No
         output_path = path + ".avi"
        
         logging.info(f"target {target} output_path {output_path}")
-        logging.info(f"tracker {tracker} tile {tile}")
+        logging.info(f"Using DeepSORT tracker, tile {tile}")
 
         # Run the video processing function
         process_video(  model_path, process_one_frame, 
                         input_path, output_path, 
-                        tracker, tile, 
+                        None, tile,  # Pass None for tracker since we're using DeepSORT
                         start_ms, end_ms,
                         image_size)
 
         if target == ".mp4": 
             video_bitrate, audio_bitrate = get_bitrate(input_path)
         
-            if  video_bitrate < 2 * 1024 * 1024:
+            if video_bitrate < 2 * 1024 * 1024:
                 video_bitrate = 2 * 1024 * 1024
 
             logging.info(f"bitrate video:{video_bitrate} audio:{audio_bitrate}")
@@ -194,7 +192,7 @@ def run_process_video(model_path, input_path, output_path, tracker=None, tile=No
             if (output_mp4_path):
                 logging.info(f"removing {output_path}")
                 os.remove(output_path)
-                logging.info(f"keeping  {output_mp4_path}")
+                logging.info(f"keeping {output_mp4_path}")
 
         logging.info("Video processing completed.")
     except Exception as e:
@@ -244,16 +242,16 @@ async def compress_video(
     if not size and not bitrate:
         return  {"error": "please specify not-to-exceed-size or bitrate"}
 
-    # Validate the input path
+    # check input path
     if not os.path.exists(input_path):
         return {"error": f"Input file not found: {input_path}"}
 
-    # Ensure the output directory exists
+    # check output dir
     output_dir = os.path.dirname(output_path)
     if not os.path.exists(output_dir):
         os.makedirs(output_dir, exist_ok=True)
     
-     # Add the background task
+    
     background_tasks.add_task(
         run_compress_video,
         input_path,
@@ -282,20 +280,18 @@ async def process_video_in_background(
     """
     Endpoint to start video processing as a background task using a GET request.
     """
-    # Validate the input path
+    # Check input path
     if not os.path.exists(input_path):
         return {"error": f"Input file not found: {input_path}"}
     
-    # Ensure the output directory exists
+    # Check output dir
     output_dir = os.path.dirname(output_path)
     if not os.path.exists(output_dir):
         os.makedirs(output_dir, exist_ok=True)
 
-    # overwrite ms is sec is provided
     start_ms = start * 1_000 if start != 0         else start_ms
     end_ms   = end   * 1_000 if end   is not None  else end_ms
 
-    # Add the background task
     background_tasks.add_task(
         run_process_video,
         model_path,
@@ -309,7 +305,6 @@ async def process_video_in_background(
     )
 
     return {"message": "Video processing started in the background"}
-
 
 if __name__ == "__main__":
     import uvicorn

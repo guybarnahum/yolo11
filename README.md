@@ -149,7 +149,8 @@ http://localhost:8080/process?config_name=yolo11&input_path=./input/2024_10_29_T
 - **model_path** (string): Path to the model file.
 - **input_path** (string): Path to the input video file.
 - **output_path** (string): Path to save the processed video, if a directory is used, output file name is generated
-- **tracker** (string, optional): yolo Tracker name (e.g., "botsort.yml").
+- **dataset_path** (string, optional): path to fiftyone dataset
+- **tracker** (string, optional): yolo Tracker name (e.g., ```botsort.yaml```,```bytetrack.yaml``` or ```deepsort```").
 - **tile** (int, optional): Tile size for processing.
 - **start_ms** (int, optional): Start time in milliseconds.
 - **end_ms** (int, optional): End time in milliseconds.

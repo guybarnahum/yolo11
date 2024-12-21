@@ -32,34 +32,38 @@ def build_name( name_parts, base_name = True ):
     return name
 
 
-def process_video(model_path, process_one_frame_func, input_path, output_path, 
+def process_video(model_path, process_one_frame_func, input_path, output_path, dataset_path=None,
                   tracker=None, tile=None, start_ms=None, end_ms=None, image_size=1088):
     """
     Main video processing process
     """
  
     # Check if the dataset exists, otherwise create an empty video dataset
-    dataset_dir = "/app/output/dataset"
-    dataset_type=fo.types.FiftyOneVideoLabelsDataset
+    dataset = None
 
-    try:
-        dataset = fo.Dataset.from_dir( dataset_dir=dataset_dir, dataset_type=dataset_type)
-    except Exception as e:
-        logging.error(f"Exception: {str(e)}")
-        dataset = None
+    if dataset_path:
+        dataset_type=fo.types.FiftyOneVideoLabelsDataset
+        try:
+            logging.info(f"Loading dataset from {dataset_path}")
+            dataset = fo.Dataset.from_dir( dataset_dir=dataset_path, dataset_type=dataset_type)
+            loggin.info(f"Loading finished...")
+        except Exception as e:
+            logging.error(f"Exception: {str(e)}")
+            dataset = None
 
-    if not dataset:
-        dataset = fo.Dataset()
-        dataset.media_type = "video" 
-        dataset.persistent = True
-        # Define the schema for frame-level fields
-        dataset.add_frame_field("detections", fo.EmbeddedDocumentField, embedded_doc_type=fo.Detections)
-        logging.info(f"dataset created")
+        if not dataset:
+            dataset = fo.Dataset()
+            dataset.media_type = "video" 
+            dataset.persistent = True
+            # Define the schema for frame-level fields
+            dataset.add_frame_field("detections", fo.EmbeddedDocumentField, embedded_doc_type=fo.Detections)
+            logging.info(f"dataset created")
 
     model_label = build_name( [ 'model', model_path, tracker, tile ] )
     logging.info(f"model_label {model_label}")
 
-    sample = fo.Sample(filepath=input_path)
+    if dataset:
+        sample = fo.Sample(filepath=input_path)
    
     # Load models from the config
     detect_model, tile_model = setup_model(model_path, tile, image_size=image_size)
@@ -97,14 +101,15 @@ def process_video(model_path, process_one_frame_func, input_path, output_path,
         
         im0, detections_list = process_one_frame_func(im0, detect_model, tile_model, tracker, tile)
         out.write(im0)
-   
-        for detection in detections_list:
-            detection.tags.append(model_label)
 
-        detections_obj = fo.Detections(detections=detections_list)    
-        frame_obj = fo.Frame(detections=detections_obj)
+        if dataset:
+            for detection in detections_list:
+                detection.tags.append(model_label)
+
+            detections_obj = fo.Detections(detections=detections_list)    
+            frame_obj = fo.Frame(detections=detections_obj)
       
-        sample.frames[ frame_ix + 1 ] = frame_obj
+            sample.frames[ frame_ix + 1 ] = frame_obj
         
         if frame_ix % one_percent == 0:
             print(".")
@@ -112,13 +117,16 @@ def process_video(model_path, process_one_frame_func, input_path, output_path,
         progress_bar.update(1)
     
     # Add the sample to the dataset and save
-    dataset.add_sample(sample)
-    sample.save()
+    if dataset:
+        
+        logging.info("Adding sample to dataset")
+        dataset.add_sample(sample)
+        sample.save()
+        logging.info(f"Adding sample finished...")
 
-    dataset.export(
-        export_dir=dataset_dir,
-        dataset_type=dataset_type,
-    )
+        logging.info(f"Exporting dataset into {dataset_path}")
+        dataset.export( export_dir=dataset_path, dataset_type=dataset_type)
+        logging.info(f"Exporting dataset finished...")
 
     progress_bar.close()
     out.release()
@@ -149,7 +157,7 @@ def run_compress_video(input_path, output_path, size_upper_bound = 0, bitrate = 
         traceback.print_exc()
 
 
-def run_process_video(model_path, input_path, output_path, tracker=None, tile=None, start_ms=None, end_ms=None, image_size=1088):
+def run_process_video(model_path, input_path, output_path, dataset_path=None, tracker=None, tile=None, start_ms=None, end_ms=None, image_size=1088):
     """
     Background task to run the process_video function.
     """
@@ -173,7 +181,7 @@ def run_process_video(model_path, input_path, output_path, tracker=None, tile=No
 
         # Run the video processing function
         process_video(  model_path, process_one_frame, 
-                        input_path, output_path, 
+                        input_path, output_path, dataset_path,
                         tracker, tile, 
                         start_ms, end_ms,
                         image_size)
@@ -271,6 +279,7 @@ async def process_video_in_background(
     model_path: str,
     input_path: str,
     output_path: str,
+    dataset_path: Optional[str] = None,
     tracker: Optional[str] = None,
     tile: Optional[int] = None,
     start_ms: Optional[int] = 0,
@@ -301,6 +310,7 @@ async def process_video_in_background(
         model_path,
         input_path,
         output_path,
+        dataset_path,
         tracker,
         tile,
         start_ms,

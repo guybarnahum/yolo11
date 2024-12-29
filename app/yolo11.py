@@ -13,24 +13,43 @@ from sahi.predict import get_sliced_prediction
 
 from types import SimpleNamespace
 
+cls_id_car_type = ["bicycle","motorcycle","bus","train","truck","boat","van"]
+cls_id_car_list = []
+cls_id_car = None
+
+def map_cls_id_build( cls_dict ):
+    '''
+    Yolo sometimes confuses cars with bicycle, motorcycle, etc 
+    '''
+    global cls_id_car_type
+    global cls_id_car
+    global cls_id_car_list
+    
+    logging.info( f"model classes: {cls_dict}")
+
+    for cls_id, name in cls_dict.items():
+
+        if name == "car":  cls_id_car = cls_id
+        if name in cls_id_car_type: cls_id_car_list.append(cls_id)
+
+    if not cls_id_car:
+        logging.error(f"Could not locate `car` in model classes")
+    
+    if not cls_id_car:
+        logging.warning(f"Could not locate class_ids for {cls_id_car_type}")
+    
+    logging.info(f"mapping {cls_id_car_list} to car cls_id : {cls_id_car}")
+
 def map_cls_id( cls_id ):
     
-    # 0: "person"
-    # 1: "bicycle"
-    # 2: "car"
-    # 3: "motorcycle"
-    # 4: "airplane"
-    # 5: "bus"
-    # 6: "train"
-    # 7: "truck"
-    # 8: "boat"
+    global cls_id_car
+    global cls_id_car_list
 
     # yolo sometimes confuses cars with bicycle, motorcycle, etc 
-    if cls_id in [1,3,4,5,6,7,8]:
-        cls_id = 2
+    if cls_id in cls_id_car_list:
+        cls_id = cls_id_car
 
     return cls_id
-
 
 def flatten_results(results):
 
@@ -172,5 +191,6 @@ def setup_model(model_path, tile=None, image_size=1088):
                                                     ) if tile else None
     
     detect_model = YOLO(model_path, verbose=False) 
-
+    
+    map_cls_id_build( detect_model.names )
     return detect_model, tile_model

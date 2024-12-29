@@ -11,51 +11,96 @@ import logging
 from sahi import AutoDetectionModel
 from sahi.predict import get_sliced_prediction
 
-def annotate_frame(frame, results, alt_tracks = None):
+from types import SimpleNamespace
 
-     # initialize annotator for plotting masks
-    annotator = Annotator(frame, line_width=2)  
+def map_cls_id( cls_id ):
+    
+    # 0: "person"
+    # 1: "bicycle"
+    # 2: "car"
+    # 3: "motorcycle"
+    # 4: "airplane"
+    # 5: "bus"
+    # 6: "train"
+    # 7: "truck"
+    # 8: "boat"
 
-    # Loop through each detected object (in the results)
-    for idx, result in enumerate(results):
+    # yolo sometimes confuses cars with bicycle, motorcycle, etc 
+    if cls_id in [1,3,4,5,6,7,8]:
+        cls_id = 2
+
+    return cls_id
+
+
+def flatten_results(results):
+
+    detections = []
+
+    for idx, cls_results in enumerate(results):
         
-        # Extract list of track_ids
         try:
-            track_ids = alt_tracks[idx] if alt_tracks else result.boxes.id.cpu().tolist()
+            track_ids = cls_results.boxes.id.cpu().tolist()
         except Exception as e:
             # logging.warning(f"Getting track_ids failed : {str(e)}")
             track_ids =  None
 
-        if not track_ids:  # Skip if no track ID is present
-            continue
-
         try:
-            masks = result.masks.xy 
+            masks =  cls_results.masks.xy
         except Exception as e:
-            masks = None 
-        
-        for ix, track_id in enumerate(track_ids):
+            masks = None
+
+        for jdx, box in enumerate(cls_results.boxes):
             
-            # Extract bounding box coordinates, confidence, and class ID
-            conf = result.boxes.conf[ix].cpu().item()  # Confidence score
-            cls_id = int(result.boxes.cls[ix].cpu().item())  # Class ID
+            bbox   = cls_results.boxes.xyxy[jdx].cpu().tolist()
+            conf   = cls_results.boxes.conf[jdx].cpu().item()  # Confidence score
+            cls_id = int(cls_results.boxes.cls[jdx].cpu().item())  # Class ID
+            cls_id = map_cls_id(cls_id)
 
-            # Get the class name based on the class ID
-            class_label = result.names[cls_id] if cls_id < len(result.names) else "Unknown"
-            label = f"{class_label} {conf:.2f}"
+            try:
+                name = cls_results.names[ cls_id ] if cls_id < len(cls_results.names) else "Unknown"
+            except Exception as e:
+                name = "Unknown"
 
-            # Generate a color based on the track_id
-            color = colors(int(track_id), True)
+            mask        = masks[jdx]     if masks else None
+            track_id    = int(track_ids[jdx]) if track_ids else None
+
+            detection = SimpleNamespace()
+            detection.bbox = bbox
+            detection.conf = conf
+            detection.cls_id = cls_id
+            detection.name = name
+            detection.mask = mask
+            detection.track_id = track_id
+
+            detections.append( detection )
+
+    return detections
+
+
+def annotate_frame(frame, detections):
+    # initialize annotator for plotting masks
+    annotator = Annotator(frame, line_width=2)
+
+    for idx, detection in enumerate(detections):
+
+        # Get the class name based on the class ID
+        try:
+            class_label = detection.name or "Unknown"
+        except Exception as e:
+            print(str(e))
+            class_label = "Unknown"
+
+        label = f"{class_label} {detection.track_id} {detection.conf:.2f}"
+
+        # Generate a color based on the track_id
+        track_id = detection.track_id if detection.track_id else 0
+        color = colors(track_id, True)
     
-            # Draw the bounding box and the label with the generated color
-            mask = masks[ix] if masks and ix < len(masks) else None
-            
-            if mask is not None:
-            #if mask : # has mask? draw mask
-                annotator.seg_bbox(mask=mask, mask_color=color, label=label, txt_color=annotator.get_txt_color(color))
-            else: # no mask - do box
-                x1, y1, x2, y2 = result.boxes.xyxy[ix].cpu().tolist()  # Assuming result has `.boxes.xyxy`
-                annotator.box_label([x1, y1, x2, y2], label, color=color)
+        if detection.mask is not None: # has mask? draw mask
+            annotator.seg_bbox(mask=detection.mask, mask_color=color, label=label, txt_color=annotator.get_txt_color(color))
+        else: # no mask - do box
+            x1, y1, x2, y2 = detection.bbox  
+            annotator.box_label([x1, y1, x2, y2], label, color=color)
 
     return frame
 
@@ -76,7 +121,7 @@ def process_one_frame( frame, detect_model, tile_model, tracker, tile ):
  
     if tile:
          # Get sliced predictions
-        result = get_sliced_prediction( image=frame, detection_model=tile_model,
+        results = get_sliced_prediction( image=frame, detection_model=tile_model,
                                         slice_height=tile, slice_width=tile,
                                         overlap_height_ratio=0.2,overlap_width_ratio=0.2
                                     )
@@ -87,8 +132,9 @@ def process_one_frame( frame, detect_model, tile_model, tracker, tile ):
                                         classes=class_codes,
                                         verbose=False
                                     )
-        alt_tracks = deepsort_track(results, frame)
-        # print( f"alt_tracks: {alt_tracks}" )
+        detections = flatten_results(results)
+        detections = deepsort_track(detections, frame)
+
     else:
         results = detect_model.track( frame, 
                                       classes=class_codes,
@@ -96,13 +142,13 @@ def process_one_frame( frame, detect_model, tile_model, tracker, tile ):
                                       verbose=False,
                                       tracker=tracker
                                     ) 
-        alt_tracks = None
+        detections = flatten_results(results)
 
-    frame = annotate_frame(frame, results, alt_tracks)
+    frame = annotate_frame(frame, detections)
   
     # Convert YOLO results to FiftyOne Detections
     # @todo : patch detections with alt_tracks
-    
+    '''
     flatten_results = []
     for index, result in enumerate(results):
         flatten_results.extend( result )
@@ -112,8 +158,8 @@ def process_one_frame( frame, detect_model, tile_model, tracker, tile ):
     detections_list = []
     for d in detections_obj:
         detections_list.extend(d.detections)
-
-    return frame, detections_list
+    '''
+    return frame, detections
 
 
 def setup_model(model_path, tile=None, image_size=1088):

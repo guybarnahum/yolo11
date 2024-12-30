@@ -13,6 +13,9 @@ from tqdm import tqdm #select best for enviroment
 from compress_video import compress_video_to_size, compress_video_to_bitrate, get_bitrate, calculate_bit_rate
 from yolo_classes import get_yolo_classes
 from yolo11 import setup_model, process_one_frame
+log_level = os.getenv('LOG_LEVEL', 'INFO')
+logging.basicConfig(level=getattr(logging, log_level))
+
 
 app = FastAPI()
 

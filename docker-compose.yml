@@ -13,6 +13,7 @@ services:
       - "8080:8080"               # Expose FastAPI port
     environment:
       - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=DEBUG
     tty: true
     restart: always
     command: python -u -m uvicorn main:app --host 0.0.0.0 --port 8080 --reload
@@ -38,7 +39,7 @@ services:
     ports:
       - "27017:27017"
     volumes:
-      - mongo-data:/data/db   # Correct path for MongoDB
+      - mongo-data:/data/db
     command: mongod --quiet --logpath /dev/null 
 
 volumes:

@@ -46,7 +46,7 @@ def process_video(model_path, process_one_frame_func, input_path, output_path, d
         try:
             logging.info(f"Loading dataset from {dataset_path}")
             dataset = fo.Dataset.from_dir( dataset_dir=dataset_path, dataset_type=dataset_type)
-            loggin.info(f"Loading finished...")
+            logging.info(f"Loading finished...")
         except Exception as e:
             logging.error(f"Exception: {str(e)}")
             dataset = None
@@ -99,12 +99,27 @@ def process_video(model_path, process_one_frame_func, input_path, output_path, d
         if not ret:
             break
         
-        im0, detections_list = process_one_frame_func(im0, detect_model, tile_model, tracker, tile)
+        im0, detections = process_one_frame_func(im0, detect_model, tile_model, tracker, tile)
         out.write(im0)
 
         if dataset:
-            for detection in detections_list:
-                detection.tags.append(model_label)
+            detections_list = []
+            for detection in detections:
+                # Convert to [top-left-x, top-left-y, width, height]
+                 # in relative coordinates in [0, 1] x [0, 1]
+                x1, y1, x2, y2 = detection.bbox  
+                rel_box = [x1 / w, y1 / h, (x2 - x1) / w, (y2 - y1) / h]
+                
+                detection_fo =  fo.Detection(
+                        label=detection.name,
+                        bounding_box=rel_box,
+                        confidence=detection.conf,
+                        track_id=detection.track_id 
+                    )
+
+                detection_fo.tags.append(model_label)
+
+                detections_list.append( detection_fo )
 
             detections_obj = fo.Detections(detections=detections_list)    
             frame_obj = fo.Frame(detections=detections_obj)
@@ -133,7 +148,6 @@ def process_video(model_path, process_one_frame_func, input_path, output_path, d
     cap.release()
 
     
-
 def run_compress_video(input_path, output_path, size_upper_bound = 0, bitrate = 0):
     """
     Background task to run the compress_video function.

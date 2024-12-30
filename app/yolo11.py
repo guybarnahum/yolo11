@@ -1,17 +1,12 @@
-import fiftyone as fo
-
-from fiftyone.core.labels import Detections, Detection
-import fiftyone.utils.ultralytics as fou
-from trackers.deepsort.tracker import track as deepsort_track
-
-import json
 from ultralytics import YOLO
 from ultralytics.utils.plotting import Annotator, colors
+
 import logging
 from sahi import AutoDetectionModel
 from sahi.predict import get_sliced_prediction
-
 from types import SimpleNamespace
+
+from trackers.deepsort.tracker import track as deepsort_track
 
 cls_id_car_type = ["bicycle","motorcycle","bus","train","truck","boat","van"]
 cls_id_car_list = []
@@ -165,19 +160,6 @@ def process_one_frame( frame, detect_model, tile_model, tracker, tile ):
 
     frame = annotate_frame(frame, detections)
   
-    # Convert YOLO results to FiftyOne Detections
-    # @todo : patch detections with alt_tracks
-    '''
-    flatten_results = []
-    for index, result in enumerate(results):
-        flatten_results.extend( result )
-        
-    detections_obj = fou.to_detections(flatten_results)
-    
-    detections_list = []
-    for d in detections_obj:
-        detections_list.extend(d.detections)
-    '''
     return frame, detections
 
 

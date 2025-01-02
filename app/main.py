@@ -98,8 +98,8 @@ def process_video(model_path, process_one_frame_func, input_path, output_path, d
         ret, im0 = cap.read()
         if not ret:
             break
-        
-        im0, detections = process_one_frame_func(im0, detect_model, tile_model, tracker, tile)
+
+        im0, detections = process_one_frame_func(im0, detect_model, tile_model, tracker, tile, frame_number=frame_ix)
         out.write(im0)
 
         if dataset:

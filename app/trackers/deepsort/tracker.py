@@ -1,7 +1,10 @@
 from deep_sort_realtime.deepsort_tracker import DeepSort, Detection
 
 # Initialize DeepSort tracker
-deepsort_tracker = DeepSort(max_age=150) # 150 frames or 5 sec memory
+deepsort_tracker = DeepSort(max_age=150, # 150 frames or 5 sec memory
+                            max_iou_distance=1.0,
+                            nn_budget=200
+                    )
 
 def yolo_to_ltwh(xyxy):
     """Convert [x1, y1, x2, y2] bounding box to [left, top, width, height] format."""

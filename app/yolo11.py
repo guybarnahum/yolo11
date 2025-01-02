@@ -91,7 +91,7 @@ def flatten_results(results):
     return detections
 
 
-def annotate_frame(frame, detections):
+def annotate_frame(frame, detections, frame_number=None):
     # initialize annotator for plotting masks
     annotator = Annotator(frame, line_width=2)
 
@@ -116,10 +116,18 @@ def annotate_frame(frame, detections):
             x1, y1, x2, y2 = detection.bbox  
             annotator.box_label([x1, y1, x2, y2], label, color=color)
 
+    if frame_number:
+        # Define the position and text for the frame number
+        position = (10, 50)  # (x, y) position on the frame
+        text = f"Frame: {frame_number}"
+
+        # Draw the text on the frame
+        annotator.text(position, text,txt_color=(0,0,0),box_style=True)
+
     return frame
 
 
-def process_one_frame( frame, detect_model, tile_model, tracker, tile ):
+def process_one_frame( frame, detect_model, tile_model, tracker, tile, frame_number = None ):
 
     # 0: "person"
     # 1: "bicycle"
@@ -158,7 +166,7 @@ def process_one_frame( frame, detect_model, tile_model, tracker, tile ):
                                     ) 
         detections = flatten_results(results)
 
-    frame = annotate_frame(frame, detections)
+    frame = annotate_frame(frame, detections, frame_number=frame_number)
   
     return frame, detections
 

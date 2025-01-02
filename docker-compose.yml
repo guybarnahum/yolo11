@@ -1,18 +1,21 @@
 services:
-
   fastapi:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: yolo11-tracker
     volumes:
-      - ./input:/app/input        # Map input directory
-      - ./output:/app/output      # Map output directory
-      - ./models:/app/models      # Map models directory
+      - ./input:/app/input
+      - ./output:/app/output
+      - ./models:/app/models
+      - ./configs:/app/sam2/configs  # Mount to the correct SAM2 configs location
     ports:
-      - "8080:8080"               # Expose FastAPI port
+      - "8080:8080"
     environment:
       - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=DEBUG
+      - SAM2_BUILD_CUDA=0
+      - SAM2_BUILD_ALLOW_ERRORS=1
     tty: true
     restart: always
     command: python -u -m uvicorn main:app --host 0.0.0.0 --port 8080 --reload
@@ -22,8 +25,8 @@ services:
       context: .
       dockerfile: Dockerfile_fiftyone
     volumes:
-      - ./fiftyone_output:/app/fiftyone_output  # Use a separate volume for FiftyOne
-      - ./output:/app/output                    # Map output directory
+      - ./fiftyone_output:/app/fiftyone_output
+      - ./output:/app/output
     ports:
       - "5151:5151"
     environment:
@@ -38,7 +41,7 @@ services:
     ports:
       - "27017:27017"
     volumes:
-      - mongo-data:/data/db   # Correct path for MongoDB
+      - mongo-data:/data/db
     command: mongod --quiet --logpath /dev/null 
 
 volumes:

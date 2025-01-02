@@ -1,178 +1,135 @@
+import fiftyone as fo
+import cv2
+import numpy as np
+from fiftyone.core.labels import Detections, Detection
+import fiftyone.utils.ultralytics as fou
+from trackers.deepsort.tracker import track as deepsort_track
+
 from ultralytics import YOLO
 from ultralytics.utils.plotting import Annotator, colors
-
 import logging
 from sahi import AutoDetectionModel
 from sahi.predict import get_sliced_prediction
-from types import SimpleNamespace
 
-from trackers.deepsort.tracker import track as deepsort_track
-
-cls_id_car_type = ["bicycle","motorcycle","bus","train","truck","boat","van"]
-cls_id_car_list = []
-cls_id_car = None
-
-def map_cls_id_build( cls_dict ):
-    '''
-    Yolo sometimes confuses cars with bicycle, motorcycle, etc 
-    '''
-    global cls_id_car_type
-    global cls_id_car
-    global cls_id_car_list
-    
-    logging.info( f"model classes: {cls_dict}")
-
-    for cls_id, name in cls_dict.items():
-
-        if name == "car":  cls_id_car = cls_id
-        if name in cls_id_car_type: cls_id_car_list.append(cls_id)
-
-    if not cls_id_car:
-        logging.error(f"Could not locate `car` in model classes")
-    
-    if not cls_id_car:
-        logging.warning(f"Could not locate class_ids for {cls_id_car_type}")
-    
-    logging.info(f"mapping {cls_id_car_list} to car cls_id : {cls_id_car}")
-
-def map_cls_id( cls_id ):
-    
-    global cls_id_car
-    global cls_id_car_list
-
-    # yolo sometimes confuses cars with bicycle, motorcycle, etc 
-    if cls_id in cls_id_car_list:
-        cls_id = cls_id_car
-
-    return cls_id
-
-def flatten_results(results):
-
-    detections = []
-
-    for idx, cls_results in enumerate(results):
-        
-        try:
-            track_ids = cls_results.boxes.id.cpu().tolist()
-        except Exception as e:
-            # logging.warning(f"Getting track_ids failed : {str(e)}")
-            track_ids =  None
-
-        try:
-            masks =  cls_results.masks.xy
-        except Exception as e:
-            masks = None
-
-        for jdx, box in enumerate(cls_results.boxes):
-            
-            bbox   = cls_results.boxes.xyxy[jdx].cpu().tolist()
-            conf   = cls_results.boxes.conf[jdx].cpu().item()  # Confidence score
-            cls_id = int(cls_results.boxes.cls[jdx].cpu().item())  # Class ID
-            cls_id = map_cls_id(cls_id)
-
-            try:
-                name = cls_results.names[ cls_id ] if cls_id < len(cls_results.names) else "Unknown"
-            except Exception as e:
-                name = "Unknown"
-
-            mask        = masks[jdx]     if masks else None
-            track_id    = int(track_ids[jdx]) if track_ids else None
-
-            detection = SimpleNamespace()
-            detection.bbox = bbox
-            detection.conf = conf
-            detection.cls_id = cls_id
-            detection.name = name
-            detection.mask = mask
-            detection.track_id = track_id
-
-            detections.append( detection )
-
-    return detections
-
-
-def annotate_frame(frame, detections):
-    # initialize annotator for plotting masks
+def annotate_frame(frame, results, alt_tracks=None, sam2_results=None):
+    """
+    Annotate frame with YOLO detections and SAM2 segmentations
+    """
     annotator = Annotator(frame, line_width=2)
 
-    for idx, detection in enumerate(detections):
+    # First draw SAM2 segmentation masks if available
+    if sam2_results:
+        for mask, box, conf, cls_id in sam2_results:
+            # Convert boolean mask to uint8
+            mask_img = (mask * 255).astype(np.uint8)
+            
+            # Find and draw contours
+            contours, _ = cv2.findContours(mask_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            # Use a unique color for this detection
+            color = colors(cls_id, True)
+            
+            # Draw contours
+            cv2.drawContours(frame, contours, -1, color, 2)
 
-        # Get the class name based on the class ID
+    # Then draw YOLO boxes and labels
+    for idx, result in enumerate(results):
         try:
-            class_label = detection.name or "Unknown"
+            track_ids = alt_tracks[idx] if alt_tracks else result.boxes.id.cpu().tolist()
         except Exception as e:
-            print(str(e))
-            class_label = "Unknown"
+            track_ids = None
 
-        label = f"{class_label} {detection.track_id} {detection.conf:.2f}"
+        if not track_ids:
+            continue
 
-        # Generate a color based on the track_id
-        track_id = detection.track_id if detection.track_id else 0
-        color = colors(track_id, True)
+        try:
+            masks = result.masks.xy 
+        except Exception as e:
+            masks = None 
+        
+        for ix, track_id in enumerate(track_ids):
+            conf = result.boxes.conf[ix].cpu().item()
+            cls_id = int(result.boxes.cls[ix].cpu().item())
+            class_label = result.names[cls_id] if cls_id < len(result.names) else "Unknown"
+            label = f"{class_label} {conf:.2f}"
+            color = colors(int(track_id), True)
     
-        if detection.mask is not None: # has mask? draw mask
-            annotator.seg_bbox(mask=detection.mask, mask_color=color, label=label, txt_color=annotator.get_txt_color(color))
-        else: # no mask - do box
-            x1, y1, x2, y2 = detection.bbox  
+            # Draw bounding box
+            x1, y1, x2, y2 = result.boxes.xyxy[ix].cpu().tolist()
             annotator.box_label([x1, y1, x2, y2], label, color=color)
 
     return frame
 
-
-def process_one_frame( frame, detect_model, tile_model, tracker, tile ):
-
-    # 0: "person"
-    # 1: "bicycle"
-    # 2: "car"
-    # 3: "motorcycle"
-    # 4: "airplane"
-    # 5: "bus"
-    # 6: "train"
-    # 7: "truck"
-    # 8: "boat"
-
+def process_one_frame(frame, detect_model, tile_model, tracker, tile, sam2_handler=None):
+    """
+    Process one frame with YOLO detection and optional SAM2 segmentation
+    """
     class_codes = [0,1,2,3,4,5,6,7,8]
  
     if tile:
-         # Get sliced predictions
-        results = get_sliced_prediction( image=frame, detection_model=tile_model,
-                                        slice_height=tile, slice_width=tile,
-                                        overlap_height_ratio=0.2,overlap_width_ratio=0.2
-                                    )
+        result = get_sliced_prediction(
+            image=frame, 
+            detection_model=tile_model,
+            slice_height=tile, 
+            slice_width=tile,
+            overlap_height_ratio=0.2,
+            overlap_width_ratio=0.2
+        )
 
-    # object detection and tracking
-    if tracker == 'deepsort' :
-        results = detect_model.predict( source=frame,
-                                        classes=class_codes,
-                                        verbose=False
-                                    )
-        detections = flatten_results(results)
-        detections = deepsort_track(detections, frame)
-
+    if tracker == 'deepsort':
+        results = detect_model.predict(
+            source=frame,
+            classes=class_codes,
+            verbose=False
+        )
+        alt_tracks = deepsort_track(results, frame)
     else:
-        results = detect_model.track( frame, 
-                                      classes=class_codes,
-                                      persist=True,
-                                      verbose=False,
-                                      tracker=tracker
-                                    ) 
-        detections = flatten_results(results)
+        results = detect_model.track(
+            frame, 
+            classes=class_codes,
+            persist=True,
+            verbose=False,
+            tracker=tracker
+        ) 
+        alt_tracks = None
 
-    frame = annotate_frame(frame, detections)
+    # Get SAM2 segmentation masks if handler is provided
+    sam2_results = []
+    if sam2_handler is not None:
+        try:
+            sam2_results = sam2_handler.process_yolo_detections(frame, results)
+        except Exception as e:
+            logging.error(f"Error getting SAM2 segmentations: {e}")
+
+    # Annotate frame with both YOLO and SAM2 results
+    frame = annotate_frame(frame, results, alt_tracks, sam2_results)
   
-    return frame, detections
+    # Convert YOLO results to FiftyOne Detections
+    flatten_results = []
+    for index, result in enumerate(results):
+        flatten_results.extend(result)
+        
+    detections_obj = fou.to_detections(flatten_results)
+    
+    detections_list = []
+    for d in detections_obj:
+        detections_list.extend(d.detections)
 
+    return frame, detections_list
 
 def setup_model(model_path, tile=None, image_size=1088):
+    """Setup YOLO model for detection"""
+    tile_model = None
+    if tile:
+        tile_model = AutoDetectionModel.from_pretrained(
+            model_type='yolov8', 
+            model_path=model_path, 
+            confidence_threshold=0.5,
+            device='cpu',
+            image_size=image_size
+        )
+    
+    detect_model = YOLO(model_path, verbose=False)
+    detect_model.cpu()  # Ensure model is on CPU
 
-    # Wrap the YOLO model with SAHI's detection model
-    tile_model = AutoDetectionModel.from_pretrained( model_type= 'yolov8', model_path=model_path, 
-                                                     confidence_threshold=0.5,
-                                                     device='cpu',
-                                                     image_size=image_size
-                                                    ) if tile else None
-    
-    detect_model = YOLO(model_path, verbose=False) 
-    
-    map_cls_id_build( detect_model.names )
     return detect_model, tile_model

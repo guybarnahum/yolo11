@@ -8,11 +8,12 @@ import fiftyone as fo
 from typing import Optional
 import os
 import time
-from tqdm import tqdm #select best for enviroment
+from tqdm import tqdm
 
 from compress_video import compress_video_to_size, compress_video_to_bitrate, get_bitrate, calculate_bit_rate
 from yolo_classes import get_yolo_classes
 from yolo11 import setup_model, process_one_frame
+from sam2_handler import SAM2Handler
 
 app = FastAPI()
 
@@ -33,19 +34,17 @@ def build_name( name_parts, base_name = True ):
 
 
 def process_video(model_path, process_one_frame_func, input_path, output_path, dataset_path=None,
-                  tracker=None, tile=None, start_ms=None, end_ms=None, image_size=1088):
+                  tracker=None, tile=None, start_ms=None, end_ms=None, image_size=1088, 
+                  use_sam2=False):
     """
-    Main video processing process
+    Main video processing function with optional SAM2 segmentation
     """
- 
-    # Check if the dataset exists, otherwise create an empty video dataset
     dataset = None
-
     if dataset_path:
         dataset_type=fo.types.FiftyOneVideoLabelsDataset
         try:
             logging.info(f"Loading dataset from {dataset_path}")
-            dataset = fo.Dataset.from_dir( dataset_dir=dataset_path, dataset_type=dataset_type)
+            dataset = fo.Dataset.from_dir(dataset_dir=dataset_path, dataset_type=dataset_type)
             logging.info(f"Loading finished...")
         except Exception as e:
             logging.error(f"Exception: {str(e)}")
@@ -55,97 +54,87 @@ def process_video(model_path, process_one_frame_func, input_path, output_path, d
             dataset = fo.Dataset()
             dataset.media_type = "video" 
             dataset.persistent = True
-            # Define the schema for frame-level fields
             dataset.add_frame_field("detections", fo.EmbeddedDocumentField, embedded_doc_type=fo.Detections)
             logging.info(f"dataset created")
 
-    model_label = build_name( [ 'model', model_path, tracker, tile ] )
+    model_label = build_name([model_path, tracker, tile, "sam2" if use_sam2 else None])
     logging.info(f"model_label {model_label}")
 
     if dataset:
         sample = fo.Sample(filepath=input_path)
    
-    # Load models from the config
+    # Load models
     detect_model, tile_model = setup_model(model_path, tile, image_size=image_size)
-    logging.info(f"detect-model: {model_path}, tile: {tile}")
+    
+    # Initialize SAM2 if requested
+    sam2_handler = None
+    if use_sam2:
+        try:
+            sam2_handler = SAM2Handler()
+            logging.info("SAM2 initialized successfully")
+        except Exception as e:
+            logging.error(f"Failed to initialize SAM2: {e}")
+            sam2_handler = None
 
-    # Video capture
     cap = cv2.VideoCapture(input_path)
     if not cap.isOpened():
         logger.error("Failed to open input video")
         return
 
-    # Video writer
     w, h, fps = (int(cap.get(x)) for x in (cv2.CAP_PROP_FRAME_WIDTH, 
-                                           cv2.CAP_PROP_FRAME_HEIGHT, 
-                                           cv2.CAP_PROP_FPS))
+                                          cv2.CAP_PROP_FRAME_HEIGHT, 
+                                          cv2.CAP_PROP_FPS))
     out = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*"MJPG"), fps, (w, h))
 
-    # Frame calculations
     start_frame = int(start_ms * fps / 1000) if start_ms else 0   
     end_frame = int(end_ms * fps / 1000) if end_ms else int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
     frames_to_process = end_frame - start_frame
     progress_bar = tqdm(total=frames_to_process)
-    one_percent  = int(frames_to_process / 100) + 1
+    one_percent = int(frames_to_process / 100) + 1
 
-    logging.info(f"{frames_to_process} from [{start_frame}..{end_frame}]")
-    logging.info(f"one_percent : {one_percent}")
-
+    logging.info(f"Processing {frames_to_process} frames from [{start_frame}..{end_frame}]")
     cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
 
-    for frame_ix in range(start_frame, end_frame):
-        ret, im0 = cap.read()
-        if not ret:
-            break
-        
-        im0, detections = process_one_frame_func(im0, detect_model, tile_model, tracker, tile)
-        out.write(im0)
+    try:
+        for frame_ix in range(start_frame, end_frame):
+            ret, im0 = cap.read()
+            if not ret:
+                break
+            
+            im0, detections_list = process_one_frame_func(
+                im0, detect_model, tile_model, tracker, tile, sam2_handler
+            )
+            out.write(im0)
+
+            if dataset:
+                for detection in detections_list:
+                    detection.tags.append(model_label)
+
+                detections_obj = fo.Detections(detections=detections_list)    
+                frame_obj = fo.Frame(detections=detections_obj)
+                sample.frames[frame_ix + 1] = frame_obj
+            
+            if frame_ix % one_percent == 0:
+                print(".")
+
+            progress_bar.update(1)
 
         if dataset:
-            detections_list = []
-            for detection in detections:
-                # Convert to [top-left-x, top-left-y, width, height]
-                 # in relative coordinates in [0, 1] x [0, 1]
-                x1, y1, x2, y2 = detection.bbox  
-                rel_box = [x1 / w, y1 / h, (x2 - x1) / w, (y2 - y1) / h]
-                
-                detection_fo =  fo.Detection(
-                        label=detection.name,
-                        bounding_box=rel_box,
-                        confidence=detection.conf,
-                        track_id=detection.track_id 
-                    )
-
-                detection_fo.tags.append(model_label)
-
-                detections_list.append( detection_fo )
-
-            detections_obj = fo.Detections(detections=detections_list)    
-            frame_obj = fo.Frame(detections=detections_obj)
-      
-            sample.frames[ frame_ix + 1 ] = frame_obj
-        
-        if frame_ix % one_percent == 0:
-            print(".")
-
-        progress_bar.update(1)
+            logging.info("Adding sample to dataset")
+            dataset.add_sample(sample)
+            sample.save()
+            
+            logging.info(f"Exporting dataset to {dataset_path}")
+            dataset.export(export_dir=dataset_path, dataset_type=dataset_type)
     
-    # Add the sample to the dataset and save
-    if dataset:
+    finally:
+        if sam2_handler:
+            sam2_handler.cleanup()
         
-        logging.info("Adding sample to dataset")
-        dataset.add_sample(sample)
-        sample.save()
-        logging.info(f"Adding sample finished...")
-
-        logging.info(f"Exporting dataset into {dataset_path}")
-        dataset.export( export_dir=dataset_path, dataset_type=dataset_type)
-        logging.info(f"Exporting dataset finished...")
-
-    progress_bar.close()
-    out.release()
-    cap.release()
+        progress_bar.close()
+        out.release()
+        cap.release()
 
     
 def run_compress_video(input_path, output_path, size_upper_bound = 0, bitrate = 0):
@@ -266,16 +255,13 @@ async def compress_video(
     if not size and not bitrate:
         return  {"error": "please specify not-to-exceed-size or bitrate"}
 
-    # Validate the input path
     if not os.path.exists(input_path):
         return {"error": f"Input file not found: {input_path}"}
 
-    # Ensure the output directory exists
     output_dir = os.path.dirname(output_path)
     if not os.path.exists(output_dir):
         os.makedirs(output_dir, exist_ok=True)
     
-     # Add the background task
     background_tasks.add_task(
         run_compress_video,
         input_path,
@@ -300,25 +286,20 @@ async def process_video_in_background(
     end_ms: Optional[int] = None,
     start: Optional[int] = 0,
     end: Optional[int] = None,
-    image_size: Optional[int] = 1088
+    image_size: Optional[int] = 1088,
+    use_sam2: Optional[bool] = False
 ):
-    """
-    Endpoint to start video processing as a background task using a GET request.
-    """
-    # Validate the input path
+    """Process video with optional SAM2 segmentation"""
     if not os.path.exists(input_path):
         return {"error": f"Input file not found: {input_path}"}
     
-    # Ensure the output directory exists
     output_dir = os.path.dirname(output_path)
     if not os.path.exists(output_dir):
         os.makedirs(output_dir, exist_ok=True)
 
-    # overwrite ms is sec is provided
-    start_ms = start * 1_000 if start != 0         else start_ms
-    end_ms   = end   * 1_000 if end   is not None  else end_ms
+    start_ms = start * 1_000 if start != 0 else start_ms
+    end_ms = end * 1_000 if end is not None else end_ms
 
-    # Add the background task
     background_tasks.add_task(
         run_process_video,
         model_path,
@@ -329,7 +310,8 @@ async def process_video_in_background(
         tile,
         start_ms,
         end_ms,
-        image_size
+        image_size,
+        use_sam2
     )
 
     return {"message": "Video processing started in the background"}

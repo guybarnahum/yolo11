@@ -8,6 +8,70 @@ from types import SimpleNamespace
 
 from trackers.deepsort.tracker import track as deepsort_track
 
+def bbox_iou(bbox1, bbox2):
+    """
+    Calculate the Intersection over Union (IoU) of two bounding boxes.
+    Args:
+        bbox1: [x1, y1, x2, y2]
+        bbox2: [x1, y1, x2, y2]
+    Returns:
+        IoU value (float)
+    """
+    x1 = max(bbox1[0], bbox2[0])
+    y1 = max(bbox1[1], bbox2[1])
+    x2 = min(bbox1[2], bbox2[2])
+    y2 = min(bbox1[3], bbox2[3])
+    
+    inter_area = max(0, x2 - x1) * max(0, y2 - y1)
+    bbox1_area = (bbox1[2] - bbox1[0]) * (bbox1[3] - bbox1[1])
+    bbox2_area = (bbox2[2] - bbox2[0]) * (bbox2[3] - bbox2[1])
+    
+    union_area = bbox1_area + bbox2_area - inter_area
+    
+    iou = inter_area / union_area if union_area > 0 else 0
+    return iou
+
+def non_max_suppression(detections, iou_threshold=0.5):
+    """
+    Perform Non-Maximum Suppression (NMS) to remove overlapping detections,
+    optimized by sorting based on x-coordinates.
+
+    Args:
+        detections: List of detection objects, each with .bbox and .conf attributes.
+        iou_threshold: IoU threshold to filter overlapping boxes.
+
+    Returns:
+        List of filtered detection objects.
+    """
+    if len(detections) == 0:
+        return []
+
+    # Step 1: Sort detections by the leftmost x-coordinate (bbox[0])
+    detections = sorted(detections, key=lambda det: det.bbox[0])
+
+    filtered_detections = []
+    while detections:
+        # Step 2: Take the detection with the highest confidence
+        best_idx = max(range(len(detections)), key=lambda i: detections[i].conf)
+        best_detection = detections.pop(best_idx)
+        filtered_detections.append(best_detection)
+
+        # Step 3: Compare only with neighboring bboxes based on x-coordinates
+        neighbors = [
+            det for det in detections 
+            if det.bbox[0] <= best_detection.bbox[2]  # Neighbor starts before 'best' ends
+        ]
+
+        # Remove overlapping neighbors
+        detections = [
+            det for det in detections 
+            if det not in neighbors or bbox_iou(best_detection.bbox, det.bbox) < iou_threshold
+        ]
+    
+    return filtered_detections
+
+
+
 cls_id_car_type = ["bicycle","motorcycle","bus","train","truck","boat","van"]
 cls_id_car_list = []
 cls_id_car = None
@@ -88,10 +152,26 @@ def flatten_results(results):
 
             detections.append( detection )
 
+    detections = non_max_suppression(detections)
     return detections
 
+def print_detections(detections, frame_number = None):
+    
+    if frame_number:
+        print(f">>>>>>>>>>>>>>>>>>>>> Frame {frame_number} <<<<<<<<<<<<<<<<<<<<<")
+
+    for d in detections:
+        conf = round(d.conf,2)
+        bbox = [round(num, 2) for num in d.bbox]
+
+        print(f"{d.track_id},{d.name},{bbox},{conf}")
+
+
+frames_to_debug = None # [1,2,3,4,5] 
 
 def annotate_frame(frame, detections, frame_number=None):
+    global frames_to_debug
+
     # initialize annotator for plotting masks
     annotator = Annotator(frame, line_width=2)
 
@@ -123,6 +203,9 @@ def annotate_frame(frame, detections, frame_number=None):
 
         # Draw the text on the frame
         annotator.text(position, text,txt_color=(0,0,0),box_style=True)
+
+    if frames_to_debug and frame_number in frames_to_debug:
+        print_detections(detections,frame_number)
 
     return frame
 

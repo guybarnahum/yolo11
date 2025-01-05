@@ -32,8 +32,12 @@ def build_name( name_parts, base_name = True ):
     return name
 
 
-def process_video(model_path, process_one_frame_func, input_path, output_path, dataset_path=None,
-                  tracker=None, tile=None, start_ms=None, end_ms=None, image_size=1088):
+def process_video(  model_path, process_one_frame_func, 
+                    input_path, output_path, dataset_path=None,
+                    tracker=None, tile=None, 
+                    start_ms=None, end_ms=None, conf=None,
+                    image_size=1088
+                ):
     """
     Main video processing process
     """
@@ -67,7 +71,7 @@ def process_video(model_path, process_one_frame_func, input_path, output_path, d
    
     # Load models from the config
     detect_model, tile_model = setup_model(model_path, tile, image_size=image_size)
-    logging.info(f"detect-model: {model_path}, tile: {tile}")
+    logging.info(f"detect-model: {model_path}, tile: {tile}, conf: {conf}")
 
     # Video capture
     cap = cv2.VideoCapture(input_path)
@@ -90,7 +94,7 @@ def process_video(model_path, process_one_frame_func, input_path, output_path, d
     one_percent  = int(frames_to_process / 100) + 1
 
     logging.info(f"{frames_to_process} from [{start_frame}..{end_frame}]")
-    logging.info(f"one_percent : {one_percent}")
+    logging.info(f"one_percent : {one_percent} frames")
 
     cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
 
@@ -99,7 +103,7 @@ def process_video(model_path, process_one_frame_func, input_path, output_path, d
         if not ret:
             break
 
-        im0, detections = process_one_frame_func(im0, detect_model, tile_model, tracker, tile, frame_number=frame_ix)
+        im0, detections = process_one_frame_func(im0, detect_model, tile_model, tracker, tile, conf, frame_number=frame_ix)
         out.write(im0)
 
         if dataset:
@@ -171,7 +175,11 @@ def run_compress_video(input_path, output_path, size_upper_bound = 0, bitrate = 
         traceback.print_exc()
 
 
-def run_process_video(model_path, input_path, output_path, dataset_path=None, tracker=None, tile=None, start_ms=None, end_ms=None, image_size=1088):
+def run_process_video(  model_path, input_path, output_path, 
+                        dataset_path=None, tracker=None, tile=None, 
+                        start_ms=None, end_ms=None, conf=None,
+                        image_size=1088
+                    ):
     """
     Background task to run the process_video function.
     """
@@ -198,6 +206,7 @@ def run_process_video(model_path, input_path, output_path, dataset_path=None, tr
                         input_path, output_path, dataset_path,
                         tracker, tile, 
                         start_ms, end_ms,
+                        conf,
                         image_size)
 
         if target == ".mp4": 
@@ -300,6 +309,7 @@ async def process_video_in_background(
     end_ms: Optional[int] = None,
     start: Optional[int] = 0,
     end: Optional[int] = None,
+    conf: Optional[float] = None,
     image_size: Optional[int] = 1088
 ):
     """
@@ -329,6 +339,7 @@ async def process_video_in_background(
         tile,
         start_ms,
         end_ms,
+        conf,
         image_size
     )
 

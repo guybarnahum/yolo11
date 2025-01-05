@@ -89,7 +89,7 @@ def map_cls_id_build( cls_dict ):
     for cls_id, name in cls_dict.items():
 
         if name == "car":  cls_id_car = cls_id
-        if name in cls_id_car_type: cls_id_car_list.append(cls_id)
+        if name in cls_id_car_type and cls_id not in cls_id_car_list: cls_id_car_list.append(cls_id)
 
     if not cls_id_car:
         logging.error(f"Could not locate `car` in model classes")
@@ -110,7 +110,7 @@ def map_cls_id( cls_id ):
 
     return cls_id
 
-def flatten_results(results):
+def flatten_results(results, min_conf = None):
 
     detections = []
 
@@ -129,8 +129,13 @@ def flatten_results(results):
 
         for jdx, box in enumerate(cls_results.boxes):
             
-            bbox   = cls_results.boxes.xyxy[jdx].cpu().tolist()
             conf   = cls_results.boxes.conf[jdx].cpu().item()  # Confidence score
+
+            # skip detections with low conf
+            if min_conf and min_conf > conf:
+                continue
+
+            bbox   = cls_results.boxes.xyxy[jdx].cpu().tolist()
             cls_id = int(cls_results.boxes.cls[jdx].cpu().item())  # Class ID
             cls_id = map_cls_id(cls_id)
 
@@ -210,7 +215,7 @@ def annotate_frame(frame, detections, frame_number=None):
     return frame
 
 
-def process_one_frame( frame, detect_model, tile_model, tracker, tile, frame_number = None ):
+def process_one_frame( frame, detect_model, tile_model, tracker, tile, conf, frame_number = None ):
 
     # 0: "person"
     # 1: "bicycle"
@@ -223,7 +228,8 @@ def process_one_frame( frame, detect_model, tile_model, tracker, tile, frame_num
     # 8: "boat"
 
     class_codes = [0,1,2,3,4,5,6,7,8]
- 
+    if not conf: conf = 0.3
+
     if tile:
          # Get sliced predictions
         results = get_sliced_prediction( image=frame, detection_model=tile_model,
@@ -235,19 +241,21 @@ def process_one_frame( frame, detect_model, tile_model, tracker, tile, frame_num
     if tracker == 'deepsort' :
         results = detect_model.predict( source=frame,
                                         classes=class_codes,
+                                        conf=conf,
                                         verbose=False
                                     )
-        detections = flatten_results(results)
+        detections = flatten_results(results, conf)
         detections = deepsort_track(detections, frame)
 
     else:
         results = detect_model.track( frame, 
                                       classes=class_codes,
+                                      conf=conf,
                                       persist=True,
                                       verbose=False,
                                       tracker=tracker
                                     ) 
-        detections = flatten_results(results)
+        detections = flatten_results(results, conf)
 
     frame = annotate_frame(frame, detections, frame_number=frame_number)
   

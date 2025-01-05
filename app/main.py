@@ -33,15 +33,15 @@ def build_name( name_parts, base_name = True ):
     return name
 
 
-def process_video(model_path, process_one_frame_func, input_path, output_path, dataset_path=None,
-                  tracker=None, tile=None, start_ms=None, end_ms=None, image_size=1088, 
-                  use_sam2=False):
+def process_video(model_path, process_one_frame_func, input_path, output_path, 
+                dataset_path=None, tracker=None, tile=None, start_ms=None, 
+                end_ms=None, image_size=1088, use_sam2=False, sam2_model_path=None):
     """
     Main video processing function with optional SAM2 segmentation
     """
     dataset = None
     if dataset_path:
-        dataset_type=fo.types.FiftyOneVideoLabelsDataset
+        dataset_type = fo.types.FiftyOneVideoLabelsDataset
         try:
             logging.info(f"Loading dataset from {dataset_path}")
             dataset = fo.Dataset.from_dir(dataset_dir=dataset_path, dataset_type=dataset_type)
@@ -54,31 +54,34 @@ def process_video(model_path, process_one_frame_func, input_path, output_path, d
             dataset = fo.Dataset()
             dataset.media_type = "video" 
             dataset.persistent = True
-            dataset.add_frame_field("detections", fo.EmbeddedDocumentField, embedded_doc_type=fo.Detections)
+            dataset.add_frame_field("detections", fo.EmbeddedDocumentField, 
+                                  embedded_doc_type=fo.Detections)
             logging.info(f"dataset created")
 
-    model_label = build_name([model_path, tracker, tile, "sam2" if use_sam2 else None])
+    model_label = build_name([os.path.basename(model_path), tracker, tile, 
+                            "sam2" if use_sam2 else None])
     logging.info(f"model_label {model_label}")
 
     if dataset:
         sample = fo.Sample(filepath=input_path)
    
-    # Load models
+    # Load YOLO model
     detect_model, tile_model = setup_model(model_path, tile, image_size=image_size)
     
     # Initialize SAM2 if requested
     sam2_handler = None
-    if use_sam2:
+    if use_sam2 and sam2_model_path:
         try:
-            sam2_handler = SAM2Handler()
+            sam2_handler = SAM2Handler(sam2_model_path)
             logging.info("SAM2 initialized successfully")
         except Exception as e:
             logging.error(f"Failed to initialize SAM2: {e}")
+            logging.error(traceback.format_exc())
             sam2_handler = None
 
     cap = cv2.VideoCapture(input_path)
     if not cap.isOpened():
-        logger.error("Failed to open input video")
+        logging.error("Failed to open input video")
         return
 
     w, h, fps = (int(cap.get(x)) for x in (cv2.CAP_PROP_FRAME_WIDTH, 
@@ -160,54 +163,57 @@ def run_compress_video(input_path, output_path, size_upper_bound = 0, bitrate = 
         traceback.print_exc()
 
 
-def run_process_video(model_path, input_path, output_path, dataset_path=None, tracker=None, tile=None, start_ms=None, end_ms=None, image_size=1088):
+def run_process_video(model_path, input_path, output_path, dataset_path=None, 
+                   tracker=None, tile=None, start_ms=None, end_ms=None, 
+                   image_size=1088, use_sam2=False, sam2_model_path=None):
     """
     Background task to run the process_video function.
     """
-    if not tracker: tracker="botsort.yaml"
+    if not tracker:
+        tracker = "botsort.yaml"
 
     try:
         if os.path.isdir(output_path):
-            start = round( start_ms / 1_000, 2) if start_ms else None
-            end   = round( end_ms   / 1_000, 2) if end_ms   else None
-
-            output_name = build_name([input_path, model_path, tracker, tile, start, end] )
+            start = round(start_ms / 1_000, 2) if start_ms else None
+            end = round(end_ms / 1_000, 2) if end_ms else None
+            output_name = build_name([os.path.basename(input_path), 
+                                    os.path.basename(model_path), 
+                                    tracker, tile, start, end])
+            if use_sam2:
+                output_name += '_sam2'
             output_path = os.path.normpath(output_path) + '/' + output_name + '.mp4'
 
         path, extension = os.path.splitext(output_path)
-        
         target = ".avi" if extension == ".avi" else ".mp4"
         output_path = path + ".avi"
-       
+
         logging.info(f"target {target} output_path {output_path}")
+        logging.info(f"YOLO model: {model_path}")
         logging.info(f"tracker {tracker} tile {tile}")
+        if use_sam2:
+            logging.info(f"SAM2 enabled with model: {sam2_model_path}")
 
-        # Run the video processing function
-        process_video(  model_path, process_one_frame, 
-                        input_path, output_path, dataset_path,
-                        tracker, tile, 
-                        start_ms, end_ms,
-                        image_size)
+        # Run video processing
+        process_video(model_path, process_one_frame, 
+                     input_path, output_path, dataset_path,
+                     tracker, tile, start_ms, end_ms,
+                     image_size, use_sam2, sam2_model_path)
 
-        if target == ".mp4": 
+        if target == ".mp4":
             video_bitrate, audio_bitrate = get_bitrate(input_path)
-        
-            if  video_bitrate < 2 * 1024 * 1024:
+            if video_bitrate < 2 * 1024 * 1024:
                 video_bitrate = 2 * 1024 * 1024
 
-            logging.info(f"bitrate video:{video_bitrate} audio:{audio_bitrate}")
-
             path, extension = os.path.splitext(output_path)
-            extension = '.mp4'
-            output_mp4_path = path + extension
-            output_mp4_path = compress_video_to_bitrate(output_path, output_mp4_path, video_bitrate, audio_bitrate)
+            output_mp4_path = path + '.mp4'
+            output_mp4_path = compress_video_to_bitrate(output_path, output_mp4_path, 
+                                                      video_bitrate, audio_bitrate)
 
-            if (output_mp4_path):
+            if output_mp4_path:
                 logging.info(f"removing {output_path}")
                 os.remove(output_path)
-                logging.info(f"keeping  {output_mp4_path}")
+                logging.info(f"keeping {output_mp4_path}")
 
-        logging.info("Video processing completed.")
     except Exception as e:
         logging.error(f"Error during video processing: {e}")
         traceback.print_exc()
@@ -276,9 +282,9 @@ async def compress_video(
 @app.get("/process")
 async def process_video_in_background(
     background_tasks: BackgroundTasks,
-    model_path: str,
     input_path: str,
     output_path: str,
+    model_path: str = "./models/yolo11n.pt",
     dataset_path: Optional[str] = None,
     tracker: Optional[str] = None,
     tile: Optional[int] = None,
@@ -287,7 +293,8 @@ async def process_video_in_background(
     start: Optional[int] = 0,
     end: Optional[int] = None,
     image_size: Optional[int] = 1088,
-    use_sam2: Optional[bool] = False
+    use_sam2: Optional[bool] = False,
+    sam2_model_path: Optional[str] = "./models/sam2_hiera_tiny.pt"
 ):
     """Process video with optional SAM2 segmentation"""
     if not os.path.exists(input_path):
@@ -311,11 +318,11 @@ async def process_video_in_background(
         start_ms,
         end_ms,
         image_size,
-        use_sam2
+        use_sam2,
+        sam2_model_path
     )
 
     return {"message": "Video processing started in the background"}
-
 
 if __name__ == "__main__":
     import uvicorn

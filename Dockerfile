@@ -24,10 +24,12 @@ RUN pip install -r requirements.txt
 RUN pip install -U ultralytics
 
 # Install SAM2
-RUN git clone https://github.com/facebookresearch/sam2.git && \
-    cd sam2 && \
-    pip install -e . && \
-    cd .. 
+RUN python3 -m pip install --upgrade pip && \
+    git clone https://github.com/facebookresearch/sam2.git /tmp/sam2 && \
+    cd /tmp/sam2 && \
+    python3 -m pip install -e . && \
+    python3 -c "import sam2; print('SAM2 installed successfully')" && \
+    cd /app
 
 # Copy application code
 COPY app/ .

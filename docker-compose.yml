@@ -8,7 +8,8 @@ services:
       - ./input:/app/input
       - ./output:/app/output
       - ./models:/app/models
-      - ./configs:/app/sam2/configs  # Mount to the correct SAM2 configs location
+      - ./configs:/app/configs  # Instead of /app/sam2/configs
+
     ports:
       - "8080:8080"
     environment:

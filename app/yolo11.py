@@ -11,60 +11,78 @@ import logging
 from sahi import AutoDetectionModel
 from sahi.predict import get_sliced_prediction
 
-def annotate_frame(frame, results, alt_tracks=None, sam2_results=None):
+def annotate_frame(frame, results, alt_tracks=None, sam2_handler=None, sam2_results=None):
     """
     Annotate frame with YOLO detections and SAM2 segmentations
     """
-    annotator = Annotator(frame, line_width=2)
+    frame_with_masks = frame.copy()
+    annotator = Annotator(frame_with_masks, line_width=2)
 
     # First draw SAM2 segmentation masks if available
-    if sam2_results:
-        for mask, box, conf, cls_id in sam2_results:
-            # Convert boolean mask to uint8
+    if sam2_results and sam2_handler:
+        for mask, box, conf, cls_id, track_id in sam2_results:
+            if mask is None:
+                continue
+                
+            # Convert boolean mask to uint8 for visualization
             mask_img = (mask * 255).astype(np.uint8)
             
-            # Find and draw contours
-            contours, _ = cv2.findContours(mask_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            # Find contours
+            contours, _ = cv2.findContours(mask_img, cv2.RETR_EXTERNAL, 
+                                         cv2.CHAIN_APPROX_SIMPLE)
             
-            # Use a unique color for this detection
-            color = colors(cls_id, True)
+            # Get consistent color for this tracked object
+            color = sam2_handler.get_color_for_id(track_id)
             
-            # Draw contours
-            cv2.drawContours(frame, contours, -1, color, 2)
+            # Create semi-transparent mask overlay
+            mask_overlay = np.zeros_like(frame_with_masks)
+            cv2.fillPoly(mask_overlay, contours, color)
+            alpha = 0.5
+            frame_with_masks = cv2.addWeighted(frame_with_masks, 1.0, mask_overlay, alpha, 0)
+            
+            # Draw contour edges
+            cv2.drawContours(frame_with_masks, contours, -1, color, 2)
+            
+            # Draw box if available
+            if box is not None and conf is not None:
+                x1, y1, x2, y2 = box.astype(int)
+                class_name = "person" if cls_id == 0 else "car"
+                label = f"ID:{track_id} {class_name} {conf:.2f}"
+                annotator.box_label([x1, y1, x2, y2], label, color=color)
 
-    # Then draw YOLO boxes and labels
-    for idx, result in enumerate(results):
-        try:
-            track_ids = alt_tracks[idx] if alt_tracks else result.boxes.id.cpu().tolist()
-        except Exception as e:
-            track_ids = None
+    # Then draw YOLO boxes and labels if needed
+    if results and not sam2_results:  # Only draw YOLO if no SAM2 results
+        for idx, result in enumerate(results):
+            boxes = result.boxes
+            if not boxes:
+                continue
 
-        if not track_ids:
-            continue
+            try:
+                track_ids = alt_tracks[idx] if alt_tracks else boxes.id.cpu().tolist()
+            except:
+                track_ids = [0] * len(boxes)
 
-        try:
-            masks = result.masks.xy 
-        except Exception as e:
-            masks = None 
+            for ix, track_id in enumerate(track_ids):
+                if track_id == 0:  # Skip untracked objects
+                    continue
+                    
+                box = boxes.xyxy[ix].cpu().numpy()
+                conf = boxes.conf[ix].cpu().item()
+                cls_id = int(boxes.cls[ix].cpu().item())
+                
+                class_name = "person" if cls_id == 0 else "car" if cls_id == 2 else "unknown"
+                label = f"ID:{track_id} {class_name} {conf:.2f}"
+                color = colors(int(track_id), True)
         
-        for ix, track_id in enumerate(track_ids):
-            conf = result.boxes.conf[ix].cpu().item()
-            cls_id = int(result.boxes.cls[ix].cpu().item())
-            class_label = result.names[cls_id] if cls_id < len(result.names) else "Unknown"
-            label = f"{class_label} {conf:.2f}"
-            color = colors(int(track_id), True)
-    
-            # Draw bounding box
-            x1, y1, x2, y2 = result.boxes.xyxy[ix].cpu().tolist()
-            annotator.box_label([x1, y1, x2, y2], label, color=color)
+                # Draw bounding box
+                x1, y1, x2, y2 = box.astype(int)
+                annotator.box_label([x1, y1, x2, y2], label, color=color)
 
-    return frame
+    return frame_with_masks
 
 def process_one_frame(frame, detect_model, tile_model, tracker, tile, sam2_handler=None):
-    """
-    Process one frame with YOLO detection and optional SAM2 segmentation
-    """
-    class_codes = [0,1,2,3,4,5,6,7,8]
+    """Process one frame with YOLO detection and optional SAM2 segmentation"""
+    class_codes = [0, 2]  # person and car
  
     if tile:
         result = get_sliced_prediction(
@@ -85,7 +103,7 @@ def process_one_frame(frame, detect_model, tile_model, tracker, tile, sam2_handl
         alt_tracks = deepsort_track(results, frame)
     else:
         results = detect_model.track(
-            frame, 
+            source=frame, 
             classes=class_codes,
             persist=True,
             verbose=False,
@@ -98,22 +116,20 @@ def process_one_frame(frame, detect_model, tile_model, tracker, tile, sam2_handl
     if sam2_handler is not None:
         try:
             sam2_results = sam2_handler.process_yolo_detections(frame, results)
+            # Apply SAM2 segmentation directly
+            frame = sam2_handler.apply_segmentation(frame, sam2_results)
         except Exception as e:
             logging.error(f"Error getting SAM2 segmentations: {e}")
-
-    # Annotate frame with both YOLO and SAM2 results
-    frame = annotate_frame(frame, results, alt_tracks, sam2_results)
+    else:
+        # Fall back to YOLO boxes if SAM2 not available
+        frame = annotate_frame(frame, results, alt_tracks)
   
-    # Convert YOLO results to FiftyOne Detections
-    flatten_results = []
-    for index, result in enumerate(results):
-        flatten_results.extend(result)
-        
-    detections_obj = fou.to_detections(flatten_results)
-    
+    # Convert YOLO results to FiftyOne Detections for dataset
     detections_list = []
-    for d in detections_obj:
-        detections_list.extend(d.detections)
+    for result in results:
+        detections = fou.to_detections([result])
+        if detections:
+            detections_list.extend(detections[0].detections)
 
     return frame, detections_list
 
@@ -130,6 +146,6 @@ def setup_model(model_path, tile=None, image_size=1088):
         )
     
     detect_model = YOLO(model_path, verbose=False)
-    detect_model.cpu()  # Ensure model is on CPU
+    detect_model.to('cpu')  # Ensure model is on CPU
 
     return detect_model, tile_model

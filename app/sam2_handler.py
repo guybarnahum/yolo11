@@ -203,8 +203,8 @@ class SAM2Handler:
 
         return tracked_masks
 
-    def process_yolo_detections(self, frame, yolo_results, frame_idx=0):
-        """Process YOLO detections with SAM2 segmentation and tracking"""
+    def process_yolo_detections(self, frame, yolo_results):
+        """Process YOLO detections with SAM2 segmentation"""
         try:
             current_masks = []
             person_car_classes = [0, 2]  # YOLO class IDs for person and car
@@ -213,13 +213,20 @@ class SAM2Handler:
                 self.predictor.set_image(frame)
                 
                 for result in yolo_results:
-                    for i, box in enumerate(result.boxes.xyxy):
-                        cls_id = int(result.boxes.cls[i].cpu().item())
+                    boxes = result.boxes
+                    for i in range(len(boxes.xyxy)):
+                        cls_id = int(boxes.cls[i].cpu().item())
                         if cls_id not in person_car_classes:
                             continue
                             
-                        box_np = box.cpu().numpy()
-                        conf = result.boxes.conf[i].cpu().item()
+                        box_np = boxes.xyxy[i].cpu().numpy()
+                        conf = boxes.conf[i].cpu().item()
+                        
+                        # Try to get tracking ID if available, otherwise use index
+                        try:
+                            track_id = int(boxes.id[i].cpu().item())
+                        except:
+                            track_id = i + 1
                         
                         try:
                             masks, _, _ = self.predictor.predict(
@@ -231,23 +238,21 @@ class SAM2Handler:
                             
                             if masks is not None and len(masks) > 0:
                                 current_masks.append((
-                                    masks[0],
-                                    box_np,
-                                    conf,
-                                    cls_id
+                                    masks[0],  # mask
+                                    box_np,    # box
+                                    conf,      # confidence
+                                    cls_id,    # class ID
+                                    track_id   # track ID
                                 ))
                                 
                         except Exception as e:
-                            logging.error(f"Error processing individual detection: {e}")
+                            logging.error(f"Error in SAM2 prediction: {e}")
                             continue
-                
-                # Track objects using multiple cues
-                tracked_results = self._track_objects(frame_idx, current_masks)
-                return tracked_results
-                
+            
+            return current_masks
+                    
         except Exception as e:
             logging.error(f"Error in process_yolo_detections: {e}")
-            logging.error(traceback.format_exc())
             return []
 
     def apply_segmentation(self, frame, results):
@@ -291,3 +296,5 @@ class SAM2Handler:
         self.model = None
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+        self.object_colors = {}
+        self.tracks = {}

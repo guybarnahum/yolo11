@@ -1,45 +1,93 @@
 from deep_sort_realtime.deepsort_tracker import DeepSort, Detection
+import logging
+import numpy as np
 
-# Initialize DeepSort tracker
-deepsort_tracker = DeepSort(max_age=150) # 150 frames or 5 sec memory
+# Configure logging
+logging.basicConfig(level=logging.INFO)  # Changed to INFO to reduce noise
+logger = logging.getLogger('deepsort_tracker')
+
+# Global tracker instance
+_tracker = None
+
+def get_tracker():
+    global _tracker
+    if _tracker is None:
+        _tracker = DeepSort(
+            max_age=150,
+            embedder="mobilenet",
+            half=True,
+            bgr=True,
+        )
+    return _tracker
 
 def yolo_to_ltwh(xyxy):
     """Convert [x1, y1, x2, y2] bounding box to [left, top, width, height] format."""
-    x1, y1, x2, y2 = xyxy
-    left = x1
-    top = y1
-    width = x2 - x1
-    height = y2 - y1
-    return [left, top, width, height]
+    try:
+        if isinstance(xyxy, (list, tuple)):
+            x1, y1, x2, y2 = xyxy
+        elif isinstance(xyxy, np.ndarray):
+            x1, y1, x2, y2 = xyxy.tolist()
+        else:
+            # Assume it's a tensor
+            x1, y1, x2, y2 = xyxy.cpu().tolist()
+        return [x1, y1, x2-x1, y2-y1]
+    except Exception as e:
+        logger.error(f"Error converting bbox format: {e}")
+        logger.error(f"Input bbox: {xyxy}, type: {type(xyxy)}")
+        raise
 
-
-def track(detections, frame):
-    
-    # Create a DeepSort detection object
-    detections_ds = []
-    others = []
-
-    for idx, detection in enumerate(detections):
-
-        detection.track_id = None
-        bbox_ltwh = yolo_to_ltwh(detection.bbox)
+def track(results, frame):
+    try:
+        # Get or create tracker instance
+        deepsort_tracker = get_tracker()
         
-        # Create a deepsort detection object and store the YOLO index in the 'others' field
-        detection_ds = [bbox_ltwh, detection.conf, detection.cls_id]
-        detections_ds.append(detection_ds)
-        others.append({'idx': idx})
+        # Process detections
+        detections = []
+        others = []
+        
+        for idx, result in enumerate(results):
+            try:
+                boxes = result.boxes
+                for jdx in range(len(boxes.xyxy)):
+                    try:
+                        bbox_xyxy = boxes.xyxy[jdx].cpu().tolist()
+                        confidence = boxes.conf[jdx].cpu().item()
+                        class_id = int(boxes.cls[jdx].cpu().item())
+                        
+                        bbox_ltwh = yolo_to_ltwh(bbox_xyxy)
+                        detection = [bbox_ltwh, confidence, class_id]
+                        detections.append(detection)
+                        others.append({'idx': idx, 'jdx': jdx})
+                        
+                    except Exception as e:
+                        logger.error(f"Error processing individual detection: {e}")
+                        continue
+                        
+            except Exception as e:
+                logger.error(f"Error processing result {idx}: {e}")
+                continue
 
-    # Update the tracker with the detections
-    tracks = deepsort_tracker.update_tracks(detections_ds, frame=frame, others = others)
-    
-    # Update track_id into original detection
-    for track in tracks:
-        if track.is_confirmed():
-            others = track.get_det_supplementary()
-            if others: 
-                track_id = track.track_id  # Unique track ID
-                idx = others['idx']
-
-                detections[idx].track_id = track_id
-
-    return detections
+        # Update tracks
+        tracks = deepsort_tracker.update_tracks(detections, frame=frame, others=others)
+        
+        # Initialize track IDs array
+        track_ids = []
+        for ix, result in enumerate(results):
+            track_ids.append([0] * len(result.boxes.xyxy))
+                
+        # Update track IDs
+        for track in tracks:
+            if track.is_confirmed():
+                others = track.get_det_supplementary()
+                if others:
+                    track_id = track.track_id
+                    idx = others['idx']
+                    jdx = others['jdx']
+                    track_ids[idx][jdx] = track_id
+                    
+        return track_ids
+        
+    except Exception as e:
+        logger.error(f"Error in DeepSort tracking: {e}")
+        # Return empty tracking results on error
+        return [[0] * len(result.boxes.xyxy) for result in results]

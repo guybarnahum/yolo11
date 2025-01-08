@@ -81,26 +81,17 @@ def annotate_frame(frame, results, alt_tracks=None, sam2_handler=None, sam2_resu
     return frame_with_masks
 
 def process_one_frame(frame, detect_model, tile_model, tracker, tile, sam2_handler=None):
-    """Process one frame with YOLO detection and optional SAM2 segmentation"""
+    """Process one frame with YOLO detection and optional tracking/segmentation"""
     class_codes = [0, 2]  # person and car
- 
-    if tile:
-        result = get_sliced_prediction(
-            image=frame, 
-            detection_model=tile_model,
-            slice_height=tile, 
-            slice_width=tile,
-            overlap_height_ratio=0.2,
-            overlap_width_ratio=0.2
-        )
-
+    
+    # Run YOLO detection
     if tracker == 'deepsort':
         results = detect_model.predict(
             source=frame,
             classes=class_codes,
             verbose=False
         )
-        alt_tracks = deepsort_track(results, frame)
+        track_ids = deepsort_track(results, frame)
     else:
         results = detect_model.track(
             source=frame, 
@@ -109,22 +100,23 @@ def process_one_frame(frame, detect_model, tile_model, tracker, tile, sam2_handl
             verbose=False,
             tracker=tracker
         ) 
-        alt_tracks = None
+        track_ids = None
 
-    # Get SAM2 segmentation masks if handler is provided
-    sam2_results = []
+    # Process based on what's enabled
     if sam2_handler is not None:
         try:
+            # Use SAM2 for segmentation
             sam2_results = sam2_handler.process_yolo_detections(frame, results)
-            # Apply SAM2 segmentation directly
             frame = sam2_handler.apply_segmentation(frame, sam2_results)
         except Exception as e:
-            logging.error(f"Error getting SAM2 segmentations: {e}")
+            logging.error(f"Error processing SAM2: {e}")
+            # Fallback to basic tracking visualization
+            frame = annotate_frame(frame, results, track_ids)
     else:
-        # Fall back to YOLO boxes if SAM2 not available
-        frame = annotate_frame(frame, results, alt_tracks)
-  
-    # Convert YOLO results to FiftyOne Detections for dataset
+        # Only tracking visualization
+        frame = annotate_frame(frame, results, track_ids)
+
+    # Convert YOLO results to FiftyOne Detections
     detections_list = []
     for result in results:
         detections = fou.to_detections([result])
@@ -132,6 +124,7 @@ def process_one_frame(frame, detect_model, tile_model, tracker, tile, sam2_handl
             detections_list.extend(detections[0].detections)
 
     return frame, detections_list
+
 
 def setup_model(model_path, tile=None, image_size=1088):
     """Setup YOLO model for detection"""

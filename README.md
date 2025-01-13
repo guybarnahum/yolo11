@@ -186,7 +186,8 @@ EMBEDDER_CHOICES = [
     "clip_ViT-B/16",
 ]
 
-#The code is searching for .pt or .pth embedder_wts in various paths, including trackers/deepsort/embedder_wts directory.
+# The code is searching for .pt or .pth embedder_wts in various paths, 
+# including trackers/deepsort/embedder_wts directory.
 
 ```
 
@@ -223,7 +224,7 @@ wget https://openaipublic.azureedge.net/clip/models/5806e77cd80f8b59890b7e101eab
 ### Example Breakdown
 
 For the example URL:
-http://localhost:8080/process?model_path=./models/yolo11n.pt&input_path=./input/overlapping_walks.mp4&output_path=./output/&start=15&end=180
+http://localhost:8080/process?model_path=./models/yolo11n.pt&input_path=./input/overlapping_walks.mp4&output_path=./output/&start=15&end=180&tracker=deepsort&embedder=clip_ViT-B/32
 
 
 - **model_path**: `./models/yolo11n.pt`
@@ -231,12 +232,14 @@ http://localhost:8080/process?model_path=./models/yolo11n.pt&input_path=./input/
 - **Output directory**: `output/`
 - **Start time**: `15` (15 seconds)
 - **End time**: `180` (3 minutes)
+- **Tracker**: `deepsort`
+- **Embedder**: `clip_ViT-B/32` (code will look for embedder weights at `./trackers/deepsort/embedder_wts/clip_ViT-B-32.pt`)
 
-### Viewing the Processed Output
+## Viewing the Processed Output
 
 After processing, the output files (annotated videos or images) will be saved in the `output_path` directory as an mp4 file. You can view them using any standard media player.
 
-The video and detections are also added to output/dataset directory where `fiftyone` app is loading it as `yolo11_dataset`
+If `dataset_path` is provided, the video and detections are also added to output/dataset directory where `fiftyone` app is loading it as `yolo11_dataset`
 
 
 ## Cleanup hints

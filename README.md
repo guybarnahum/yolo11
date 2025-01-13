@@ -16,14 +16,23 @@ Ensure you have the following installed on your system:
 ├── app
 │   ├── compress_video.py
 │   ├── main.py
+│   ├── trackers
+│   │   ├── botsort.yaml
+│   │   ├── bytetrack.yaml
+│   │   └── deepsort
+│   │       ├── embedder_ws
+│   │       │   ├── clip_ViT-B-16.pt
+│   │       │   ├── clip_ViT-B-32.pt
+│   │       │   └── osnet_ain_x1_0_imagenet.pth
+│   │       └── tracker.py
 │   ├── yolo11.py
 │   └── yolo_classes.py
 ├── docker-compose.yml
 ├── docker-restart.sh
 ├── fiftyone_app.py
+├── fiftyone_output
 ├── input
-│   ├── 2024_10_29_TD2eeqFV_b246bddda14e6e760189eea14480b3f8_flight-TD2eeqFV_0.mp4
-│   └── overlapping_walks.mp4
+│   └── light-q2Lzrust_0.mp4
 ├── models
 │   ├── yolo11l.pt
 │   ├── yolo11n-seg.pt
@@ -32,17 +41,17 @@ Ensure you have the following installed on your system:
 │   ├── yolo11s.pt
 │   └── yolov8n.pt
 ├── output
+│   ├── flight-q2Lzrust_0_yolo11l_deepsort_clip_ViT-B-32.mp4
+│   ├── flight-q2Lzrust_0_yolo11l_deepsort_torchreid.mp4
 │   ├── dataset
 │   │   ├── data
-│   │   │   ├── overlapping_walks.mp4
-│   │   │   └── 2024_10_29_TD2eeqFV_b246bddda14e6e760189eea14480b3f8_flight-TD2eeqFV_0.mp4
+│   │   │   └── flight-q2Lzrust_0.mp4
 │   │   ├── labels
-│   │   │   ├── overlapping_walks.json
-│   │   │   └── 2024_10_29_TD2eeqFV_b246bddda14e6e760189eea14480b3f8_flight-TD2eeqFV_0.json
+│   │   │   └── flight-q2Lzrust_0.json
 │   │   └── manifest.json
-│   ├── overlapping_walks_yolo11n_seg.mp4
-│   ├── overlapping_walks_yolo11n.mp4
-│   └── overlapping_walks_yolo11s_botsort.mp4
+│   ├── flight-q2Lzrust_0_yolo11l_bytetrack.mp4
+│   ├── flight-q2Lzrust_0_yolo11l_deepsort.mp4
+├── requirements-deepsort.txt
 └── requirements.txt
  </pre>
  
@@ -151,12 +160,65 @@ http://localhost:8080/process?config_name=yolo11&input_path=./input/2024_10_29_T
 - **output_path** (string): Path to save the processed video, if a directory is used, output file name is generated
 - **dataset_path** (string, optional): path to fiftyone dataset
 - **tracker** (string, optional): yolo Tracker name (e.g., ```botsort.yaml```,```bytetrack.yaml``` or ```deepsort```").
+- **embedder** (string, optional) : see below for `EMBEDDER_CHOICES`
+- **embedder_wts** (string, optional) : path to embedder weights file (`.pt`,`.pth`)
 - **tile** (int, optional): Tile size for processing.
 - **start_ms** (int, optional): Start time in milliseconds.
 - **end_ms** (int, optional): End time in milliseconds.
 - **start** (int, optional): Start time in seconds (overrides start_ms).
 - **end** (int, optional): End time in seconds (overrides end_ms).
 - **image_size** (int, optional): Image size for model processing (default: 1088).
+
+## DeepSort Embedders
+
+DeepSort supports the following embedder types (and also allows for externally provided embeddings)
+
+```bash
+
+EMBEDDER_CHOICES = [
+    "mobilenet", # Default choice when embedder is None
+    "torchreid",
+    "clip_RN50",
+    "clip_RN101",
+    "clip_RN50x4",
+    "clip_RN50x16",
+    "clip_ViT-B/32",
+    "clip_ViT-B/16",
+]
+
+#The code is searching for .pt or .pth embedder_wts in various paths, including trackers/deepsort/embedder_wts directory.
+
+```
+
+### CLIP models
+
+CLIP (Contrastive Language-Image Pretraining) model well-suited for generic embedding tasks with good accuracy and moderate computational demands. May have issues diffrentiating similar objects like cars, since it is "semantic", so it marks detections as "Red small car", which may not be enough for re-id task.
+
+- `clip_RN50` - CLIP with a ResNet-50 backbone.
+- `clip_RN101` - A CLIP variant with a deeper ResNet-101 backbone.
+Provides higher accuracy and is useful for scenarios requiring more detailed feature representation.
+- `clip_RN50x4` - A scaled version of CLIP with a ResNet-50 backbone and 4x wider layers.
+- `clip_RN50x16` - A further scaled version of CLIP with ResNet-50 and 16x wider layers.
+- `clip_ViT-B/32` - A Vision Transformer (ViT) model variant with a patch size of 32.
+Suitable for general-purpose ReID tasks, balance between computational cost and accuracy.
+- `clip_ViT-B/16` - A Vision Transformer model variant with a smaller patch size of 16.
+Offers finer-grained feature extraction and higher accuracy at the expense of increased computational requirements.
+
+#### Installing CLIP weights
+
+CLIP weights are not included in the repository.
+
+OpenAI has the pt files for CLIP in the following location, rename these to `clip_XXX` (`clip_ViT-B-16.pt`) and store them in `app/trackers/deepsort/embedder_ws` directory
+
+These are subject to change.
+```bash
+wget https://openaipublic.azureedge.net/clip/models/afeb0e10f9e5a86da6080e35cf09123aca3b358a0c3e3b6c78a7b63bc04b6762/RN50.pt
+wget https://openaipublic.azureedge.net/clip/models/8fa8567bab74a42d41c5915025a8e4538c3bdbe8804a470a72f30b0d94fab599/RN101.pt
+wget https://openaipublic.azureedge.net/clip/models/7e526bd135e493cef0776de27d5f42653e6b4c8bf9e0f653bb11773263205fdd/RN50x4.pt
+wget https://openaipublic.azureedge.net/clip/models/52378b407f34354e150460fe41077663dd5b39c54cd0bfd2b27167a4a06ec9aa/RN50x16.pt
+wget https://openaipublic.azureedge.net/clip/models/40d365715913c9da98579312b702a82c18be219cc2a73407c4526f58eba950af/ViT-B-32.pt
+wget https://openaipublic.azureedge.net/clip/models/5806e77cd80f8b59890b7e101eabd078d9fb84e6937f9e85e4ecb61988df416f/ViT-B-16.pt
+```
 
 ### Example Breakdown
 

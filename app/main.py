@@ -14,11 +14,34 @@ from compress_video import compress_video_to_size, compress_video_to_bitrate, ge
 from yolo_classes import get_yolo_classes
 from yolo11 import setup_model, process_one_frame
 
+from trackers.deepsort.tracker import setup as deepsort_setup
+
 app = FastAPI()
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 import traceback
+
+from torch import cuda
+
+def cuda_device():
+    device = 'cpu' # default in case of errors
+    try:
+        if cuda.is_available():
+            num_gpus = cuda.device_count()
+            logging.info(f"cuda_device: GPU is available: {num_gpus} GPU(s) detected.")
+            for i in range(num_gpus):
+                print(f"  - GPU {i}: {cuda.get_device_name(i)}")
+            device = 'cuda:0'  # Default to first GPU
+        else:
+            logging.info("cuda_device: No GPU available. Using CPU.")
+            device = 'cpu'
+
+    except Exception as e:
+        logging.error(f"check_device Error: {e}")
+        device = 'cpu'
+
+    return device
 
 def build_name( name_parts, base_name = True ): 
         
@@ -34,14 +57,21 @@ def build_name( name_parts, base_name = True ):
 
 def process_video(  model_path, process_one_frame_func, 
                     input_path, output_path, dataset_path=None,
-                    tracker=None, tile=None, 
+                    tracker=None, embedder = None, embedder_wts = None,
+                    tile=None, 
                     start_ms=None, end_ms=None, conf=None,
                     image_size=1088
                 ):
     """
     Main video processing process
     """
- 
+    device = cuda_device()
+
+    if tracker == 'deepsort':
+        deepsort_setup(embedder=embedder, embedder_wts=embedder_wts,device=device)
+
+    embedder_name = embedder.replace('/','-') if embedder else None
+
     # Check if the dataset exists, otherwise create an empty video dataset
     dataset = None
 
@@ -63,15 +93,15 @@ def process_video(  model_path, process_one_frame_func,
             dataset.add_frame_field("detections", fo.EmbeddedDocumentField, embedded_doc_type=fo.Detections)
             logging.info(f"dataset created")
 
-    model_label = build_name( [ 'model', model_path, tracker, tile ] )
+    model_label = build_name( [ 'model', model_path, tracker, tile, embedder_name ] )
     logging.info(f"model_label {model_label}")
 
     if dataset:
         sample = fo.Sample(filepath=input_path)
    
     # Load models from the config
-    detect_model, tile_model = setup_model(model_path, tile, image_size=image_size)
-    logging.info(f"detect-model: {model_path}, tile: {tile}, conf: {conf}")
+    detect_model, tile_model = setup_model(model_path, tile, image_size=image_size, device=device)
+    logging.info(f"detect-model: {model_path}, tile: {tile}, conf: {conf} device: {device}")
 
     # Video capture
     cap = cv2.VideoCapture(input_path)
@@ -103,7 +133,7 @@ def process_video(  model_path, process_one_frame_func,
         if not ret:
             break
 
-        im0, detections = process_one_frame_func(im0, detect_model, tile_model, tracker, tile, conf, frame_number=frame_ix)
+        im0, detections = process_one_frame_func(im0, detect_model, tile_model, tracker, tile, conf, frame_number=frame_ix, device=device)
         out.write(im0)
 
         if dataset:
@@ -175,9 +205,11 @@ def run_compress_video(input_path, output_path, size_upper_bound = 0, bitrate = 
         traceback.print_exc()
 
 
-def run_process_video(  model_path, input_path, output_path, 
-                        dataset_path=None, tracker=None, tile=None, 
-                        start_ms=None, end_ms=None, conf=None,
+def run_process_video(  model_path, input_path, output_path, dataset_path=None, 
+                        tracker=None, embedder=None, embedder_wts=None,
+                        tile=None, 
+                        start_ms=None, end_ms=None, 
+                        conf=None,
                         image_size=1088
                     ):
     """
@@ -189,8 +221,9 @@ def run_process_video(  model_path, input_path, output_path,
         if os.path.isdir(output_path):
             start = round( start_ms / 1_000, 2) if start_ms else None
             end   = round( end_ms   / 1_000, 2) if end_ms   else None
+            embedder_name = embedder.replace('/','-') if embedder else None
 
-            output_name = build_name([input_path, model_path, tracker, tile, start, end] )
+            output_name = build_name([input_path, model_path, tracker, tile, embedder_name, start, end] )
             output_path = os.path.normpath(output_path) + '/' + output_name + '.mp4'
 
         path, extension = os.path.splitext(output_path)
@@ -200,11 +233,13 @@ def run_process_video(  model_path, input_path, output_path,
        
         logging.info(f"target {target} output_path {output_path}")
         logging.info(f"tracker {tracker} tile {tile}")
+        logging.info(f"embedder {embedder} embedder_wts {embedder_wts}")
 
         # Run the video processing function
         process_video(  model_path, process_one_frame, 
                         input_path, output_path, dataset_path,
-                        tracker, tile, 
+                        tracker, embedder, embedder_wts,
+                        tile, 
                         start_ms, end_ms,
                         conf,
                         image_size)
@@ -304,6 +339,8 @@ async def process_video_in_background(
     output_path: str,
     dataset_path: Optional[str] = None,
     tracker: Optional[str] = None,
+    embedder: Optional[str] = None,
+    embedder_wts: Optional[str] = None,
     tile: Optional[int] = None,
     start_ms: Optional[int] = 0,
     end_ms: Optional[int] = None,
@@ -336,6 +373,8 @@ async def process_video_in_background(
         output_path,
         dataset_path,
         tracker,
+        embedder,
+        embedder_wts,
         tile,
         start_ms,
         end_ms,

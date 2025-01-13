@@ -215,7 +215,7 @@ def annotate_frame(frame, detections, frame_number=None):
     return frame
 
 
-def process_one_frame( frame, detect_model, tile_model, tracker, tile, conf, frame_number = None ):
+def process_one_frame( frame, detect_model, tile_model, tracker, tile, conf, frame_number = None, device='cpu' ):
 
     # 0: "person"
     # 1: "bicycle"
@@ -242,32 +242,40 @@ def process_one_frame( frame, detect_model, tile_model, tracker, tile, conf, fra
         results = detect_model.predict( source=frame,
                                         classes=class_codes,
                                         conf=conf,
-                                        verbose=False
+                                        verbose=False,
+                                        device=device
                                     )
         detections = flatten_results(results, conf)
         detections = deepsort_track(detections, frame)
 
     else:
-        results = detect_model.track( frame, 
-                                      classes=class_codes,
-                                      conf=conf,
-                                      persist=True,
-                                      verbose=False,
-                                      tracker=tracker
-                                    ) 
-        detections = flatten_results(results, conf)
+        try:
+            results = detect_model.track( frame, 
+                                          classes=class_codes,
+                                          conf=conf,
+                                          persist=True,
+                                          verbose=False,
+                                          tracker=tracker,
+                                          device=device
+                                        )
+                                        
+            detections = flatten_results(results, conf)
+
+        except Exception as e:
+            logging.error(f"model.track error: {str(e)}")
+            raise # not recoverable exception!
 
     frame = annotate_frame(frame, detections, frame_number=frame_number)
   
     return frame, detections
 
 
-def setup_model(model_path, tile=None, image_size=1088):
+def setup_model(model_path, tile=None, image_size=1088, device = 'cpu'):
 
     # Wrap the YOLO model with SAHI's detection model
     tile_model = AutoDetectionModel.from_pretrained( model_type= 'yolov8', model_path=model_path, 
                                                      confidence_threshold=0.5,
-                                                     device='cpu',
+                                                     device=device,
                                                      image_size=image_size
                                                     ) if tile else None
     

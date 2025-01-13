@@ -6,10 +6,12 @@ set -x
 
 # Stop and remove Docker containers managed by docker-compose
 echo "Stopping containers..."
-docker-compose down --volumes 
+# Docker version: 4.32.0 need to remove the dash from docker-compose to docker compose
+docker-compose down --volumes || docker compose down --volumes
 
 # Prune unused images
 echo "Pruning unused Docker images..."
+docker image prune -f
 docker volume prune -f
 docker network prune -f
 
@@ -29,5 +31,5 @@ if [ "$last_modified_requirements" -gt "$last_run_time" ]; then
     echo "requirements.txt was modified >> rebuild docker image"
 fi
 
-docker-compose up $build $1
-
+# Docker version: 4.32.0 need to remove the dash from docker-compose to docker compose
+docker-compose up $build $1 || docker compose up $build $1

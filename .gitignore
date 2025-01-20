@@ -7,6 +7,9 @@ __pycache__/
 input/
 output/
 
+models/easyocr/
+models/paddleocr/
+
 # C extensions
 *.so
 

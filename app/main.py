@@ -70,7 +70,7 @@ def process_video(  model_path, process_one_frame_func,
     device = cuda_device()
 
     if tracker == 'deepsort':
-        deepsort_setup(embedder=embedder, embedder_wts=embedder_wts,device=device)
+        deepsort_setup(embedder=embedder, embedder_wts=embedder_wts)
 
     embedder_name = embedder.replace('/','-') if embedder else None
 

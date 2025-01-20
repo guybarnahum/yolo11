@@ -8,11 +8,19 @@ car_inspect_model,_ = setup_model('./models/license_plate_detector.pt')
 def ocr_paddle_read(self, lp_frame):
     results = self.ocr(lp_frame, cls=True)
     logging.debug(f'ocr_paddle_read: results {results}')
-    lps = []
-    for result in results[0]:
-        text, score = result[1]
-        lps.append([text, score])
 
+    lps = []
+    if results:   
+        try:
+            for result in results[0]:
+                text, score = result[1]
+                lps.append([text, score])
+
+        except Exception as e:
+            logging.error(f"Error ocr_paddle_read - {str(e)}")
+            logging.error(f"results : {results}")
+            lps = []
+    
     logging.debug(f'ocr_paddle_read: lps {lps}')
     return lps
 

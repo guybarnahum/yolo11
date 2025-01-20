@@ -315,8 +315,10 @@ def annotate_frame(frame, detections, label = None):
             class_label = "Unknown"
 
         track_id = detection.track_id if detection.track_id else 0
-        guid = f"{detection.guid} {track_id}" if detection.guid else track_id if track_id else None
-        detection_label = f"{class_label} {guid} {detection.conf:.2f}" if guid else f"{class_label} - {detection.conf:.2f}" 
+
+        detection_label = f'{class_label}({detection.conf:.2f}) '
+        if detection.guid   : detection_label = detection_label + detection.guid + ' '
+        if track_id         : detection_label = detection_label + str(track_id)
 
         # Generate a color based on the track_id
         color = colors(track_id, True)

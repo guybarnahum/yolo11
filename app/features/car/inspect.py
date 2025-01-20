@@ -20,7 +20,7 @@ def ocr_paddle_read(self, lp_frame):
             logging.error(f"Error ocr_paddle_read - {str(e)}")
             logging.error(f"results : {results}")
             lps = []
-    
+
     logging.debug(f'ocr_paddle_read: lps {lps}')
     return lps
 
@@ -172,7 +172,7 @@ def inspect(car_detection, frame, video_path):
             lp_text, lp_score = read_license_plate( lp, frame )
             if lp_text and lp_score:
                 lp_score    = round(lp_score,2)
-                lp.guid     = f"{lp_text}/{lp_score:.2f}"
+                lp.guid     = f"{lp_text}({lp_score:.2f})"
                 logging.info( f'read_license_plate : {lp.guid}' )
 
     # print_detections(lp_detections, frame_number=car_detection.frame_number)

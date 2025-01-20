@@ -1,6 +1,7 @@
 import logging
 import os
 from deep_sort_realtime.deepsort_tracker import DeepSort, Detection
+from utils import cuda_device
 
 # Workaround to https://github.com/levan92/deep_sort_realtime/issues/57
 #
@@ -18,8 +19,10 @@ sys.modules["torchreid.utils"] = torchreid_reid_utils
 
 deepsort_tracker = None
 
-def setup(embedder = None,embedder_wts=None,device='cpu'):
+def setup(embedder = None,embedder_wts=None):
 
+    device = cuda_device()
+    
     # Examples:          
     # embedder='clip_ViT-B/16',
     # embedder_wts='./trackers/deepsort/clip_ViT-B-16.pt' OR None

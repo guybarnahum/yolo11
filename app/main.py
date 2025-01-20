@@ -1,59 +1,58 @@
-import cv2
-import importlib
 import logging
+
+# Set Root Logger level
+root_logging_level = logging.INFO
+logging.basicConfig(level=root_logging_level, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+from functools import wraps
+import traceback
+
+#
+# Protect Root logger from crazy libraries ( such as ) who set root logger and 
+# affect global logging levels.
+#
+original_setLevel = logging.Logger.setLevel
+
+# Create a wrapper that logs who called setLevel
+@wraps(original_setLevel)
+def setLevel_with_trace(self, level):
+    
+    if ( self.name == 'root' and level != root_logging_level ):
+        return
+
+    if self.name == 'root':
+        print(f"Logger {self.name} level being set to {logging.getLevelName(level)}")
+        # print("Called from:")
+        # traceback.print_stack() # discover who is setting the logger
+
+    return original_setLevel(self, level)
+
+# Replace the original method with our traced version
+logging.Logger.setLevel = setLevel_with_trace
+
+import cv2
+from dotenv import load_dotenv
+import importlib
 
 from fastapi import BackgroundTasks, FastAPI
 import fiftyone as fo
 
-from typing import Optional
 import os
 import time
 from tqdm import tqdm #select best for enviroment
+from typing import Optional
 
 from compress_video import compress_video_to_size, compress_video_to_bitrate, get_bitrate, calculate_bit_rate
-from yolo_classes import get_yolo_classes
-from yolo11 import setup_model, process_one_frame
+from yolo11 import process_one_frame
+from job_queue import enqueue_inspection_job
 
 from trackers.deepsort.tracker import setup as deepsort_setup
+from utils import build_name, cuda_device, setup_model, print_loggers
 
+load_dotenv()
 app = FastAPI()
 
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-
-import traceback
-
-from torch import cuda
-
-def cuda_device():
-    device = 'cpu' # default in case of errors
-    try:
-        if cuda.is_available():
-            num_gpus = cuda.device_count()
-            logging.info(f"cuda_device: GPU is available: {num_gpus} GPU(s) detected.")
-            for i in range(num_gpus):
-                print(f"  - GPU {i}: {cuda.get_device_name(i)}")
-            device = 'cuda:0'  # Default to first GPU
-        else:
-            logging.info("cuda_device: No GPU available. Using CPU.")
-            device = 'cpu'
-
-    except Exception as e:
-        logging.error(f"check_device Error: {e}")
-        device = 'cpu'
-
-    return device
-
-def build_name( name_parts, base_name = True ): 
-        
-    name_parts = [str(part) for part in name_parts if part ]
-    if base_name:
-        name_parts = [ os.path.basename(part)    for part in name_parts if part ]
-        name_parts = [ os.path.splitext(part)[0] for part in name_parts if part ]
-
-    name = '_'.join([str(part) for part in name_parts])
-
-    return name
-
+aync_job_queue = os.getenv('JOB_QUEUE', False)
 
 def process_video(  model_path, process_one_frame_func, 
                     input_path, output_path, dataset_path=None,
@@ -62,6 +61,9 @@ def process_video(  model_path, process_one_frame_func,
                     start_ms=None, end_ms=None, conf=None,
                     image_size=1088
                 ):
+    root_level = logging.getLogger().level
+    print(f"Logger Root, Level: {logging.getLevelName(root_level)}")
+
     """
     Main video processing process
     """
@@ -100,7 +102,7 @@ def process_video(  model_path, process_one_frame_func,
         sample = fo.Sample(filepath=input_path)
    
     # Load models from the config
-    detect_model, tile_model = setup_model(model_path, tile, image_size=image_size, device=device)
+    detect_model, tile_model = setup_model(model_path, tile, image_size=image_size, build_cls_map=True)
     logging.info(f"detect-model: {model_path}, tile: {tile}, conf: {conf} device: {device}")
 
     # Video capture
@@ -133,7 +135,18 @@ def process_video(  model_path, process_one_frame_func,
         if not ret:
             break
 
-        im0, detections = process_one_frame_func(im0, detect_model, tile_model, tracker, tile, conf, frame_number=frame_ix, device=device)
+        im0, detections = process_one_frame_func(   im0, 
+                                                    detect_model, tile_model, tracker, 
+                                                    tile, conf, 
+                                                    frame_number=frame_ix, 
+                                                    device=device,
+                                                    label=model_label)
+        
+        # Enqueue detections that need further inspection
+        for detection in detections:
+            if detection.inspect:
+                enqueue_inspection_job( detection, frame=im0, video_path=input_path, aync_job_queue=aync_job_queue)
+
         out.write(im0)
 
         if dataset:
@@ -277,14 +290,6 @@ usage = '''Usage : http://localhost:8080/process?config_name=yolo11_sliced&input
 @app.get("/")
 async def root():
     return { "message": usage }
-
-
-@app.get("/classes")
-async def yolo_classes():
-    """
-    Endpoint to return COCO dataset class names using a GET request.
-    """
-    return get_yolo_classes()
 
 
 @app.get("/bitrate")

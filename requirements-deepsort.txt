@@ -1,9 +1,0 @@
-cython
-deep-sort-realtime
-gdown
-openai-clip
-torch
-torchreid
-tensorboard
-torchvision
-transformers

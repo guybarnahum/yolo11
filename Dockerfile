@@ -9,16 +9,19 @@ RUN apt-get update && apt-get install -y \
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
+# Create a directory for pip cache (optional, pip will create it if it doesn't exist)
+ENV PIP_CACHE_DIR=/pip_cache
+
 WORKDIR /app
 
 COPY requirements.txt .
-RUN pip install -r requirements.txt 
+RUN pip install --cache-dir=$PIP_CACHE_DIR -r requirements.txt 
 # RUN pip install --no-cache-dir -r requirements.txt 
 
-RUN pip install -U ultralytics
+RUN pip install --cache-dir=$PIP_CACHE_DIR -U ultralytics
 
-COPY requirements-deepsort.txt .
-RUN pip install -r requirements-deepsort.txt 
+COPY requirements-yolo.txt .
+RUN pip install --cache-dir=$PIP_CACHE_DIR -r requirements-yolo.txt 
 
 COPY app/ .
 

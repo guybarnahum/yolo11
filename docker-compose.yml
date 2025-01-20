@@ -9,37 +9,70 @@ services:
       - ./input:/app/input        # Map input directory
       - ./output:/app/output      # Map output directory
       - ./models:/app/models      # Map models directory
+      - ./models/easyocr:/root/.EasyOCR/model # Mount easyocr model dir to retain it
+      - ./models/paddleocr:/root/.paddleocr/whl   # Persistent cache directory
+      - pip-cache:/pip_cache      # Mount pip cache directory
     ports:
       - "8080:8080"               # Expose FastAPI port
     environment:
       - PYTHONUNBUFFERED=1
+      - REDIS_HOST=redis
+      - PIP_CACHE_DIR=/pip_cache
     tty: true
     restart: always
     command: python -u -m uvicorn main:app --host 0.0.0.0 --port 8080 --reload
+    depends_on:
+      - redis
 
-  fiftyone:
+  #fiftyone:
+  #  build:
+  #    context: .
+  #    dockerfile: Dockerfile_fiftyone
+  #  volumes:
+  #    - ./fiftyone_output:/app/fiftyone_output  # Use a separate volume for FiftyOne
+  #    - ./output:/app/output                    # Map output directory
+  #  ports:
+  #    - "5151:5151"
+  #  environment:
+  #    - FIFTYONE_DATABASE_URI=mongodb://mongo:27017
+  #    - FIFTYONE_LOGGING_LEVEL=INFO
+  #  command: python /app/fiftyone_app.py
+  #  depends_on:
+  #    - mongo
+  
+  worker:
     build:
       context: .
-      dockerfile: Dockerfile_fiftyone
     volumes:
-      - ./fiftyone_output:/app/fiftyone_output  # Use a separate volume for FiftyOne
-      - ./output:/app/output                    # Map output directory
-    ports:
-      - "5151:5151"
+      - ./models:/app/models
+      - ./input:/app/input
+      - ./output:/app/output
     environment:
-      - FIFTYONE_DATABASE_URI=mongodb://mongo:27017
-      - FIFTYONE_LOGGING_LEVEL=INFO
-    command: python /app/fiftyone_app.py
+      - REDIS_HOST=redis
+      - QUEUE_NAME=detection-inspection-queue
+      - LOG_LEVEL=INFO # or DEBUG, INFO, WARNING, ERROR, CRITICAL
     depends_on:
-      - mongo
+      - redis
+      - fastapi
+    command: python job_queue_worker.py
+    # restart: on-failure
+    stop_signal: SIGTERM  # Graceful shutdown signal
 
-  mongo:
-    image: mongo:latest
+  redis:
+    image: redis:latest
     ports:
-      - "27017:27017"
-    volumes:
-      - mongo-data:/data/db   # Correct path for MongoDB
-    command: mongod --quiet --logpath /dev/null 
+      - "6379:6379"
+    command: ["redis-server", "--loglevel", "warning"]
+    stop_signal: SIGTERM  # Graceful shutdown signal
+    
+  #mongo:
+  #  image: mongo:latest
+  #  ports:
+  #    - "27017:27017"
+  #  volumes:
+  #    - mongo-data:/data/db   # Correct path for MongoDB
+  #  command: mongod --quiet --logpath /dev/null 
 
 volumes:
   mongo-data:
+  pip-cache:

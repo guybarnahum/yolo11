@@ -166,8 +166,9 @@ def map_cls_id_build( cls_dict ):
     cls_id_car_types = ["bicycle","motorcycle","bus","train","truck","boat","van"]
     cls_id_car       = None
     cls_id_car_list  = []
-    
-    logging.info( f"model classes: {cls_dict}")
+
+    cls_dict_trunc_str = str(cls_dict)[:125] + '...'
+    logging.info( f"model classes: { cls_dict_trunc_str }")
 
     for cls_id, name in cls_dict.items():
 
@@ -337,6 +338,7 @@ def annotate_frame(frame, detections, label = None):
         # Draw the text on the frame
         annotator.text(position, label,txt_color=(0,0,0),box_style=True)
 
+    # annotation is done in place not by value, but still we return frame
     return frame
 
 def build_name( name_parts, base_name = True ): 

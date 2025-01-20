@@ -1,7 +1,9 @@
 import logging
-from features.car.inspect import should_inspect as should_inspect_car
+from features.car.inspect    import should_inspect as should_inspect_car
+from features.person.inspect import should_inspect as should_inspect_person
+
 from trackers.deepsort.tracker import track as deepsort_track
-from utils import annotate_frame, print_detections, flatten_results
+from utils import print_detections, flatten_results
 
 frames_to_debug = None # [1,2,3,4,5] 
 
@@ -9,11 +11,13 @@ def should_inspect( detection ):
     
     if detection.name == 'car':
         return should_inspect_car(detection)
-    
+    elif detection.name == 'person':
+        return should_inspect_person(detection)
+
     return False
 
 
-def process_one_frame( frame, detect_model, tile_model, tracker, tile, conf, frame_number = None, device='cpu', label=None ):
+def process_one_frame( frame, detect_model, tile_model, tracker, tile, conf, frame_number = None, device='cpu' ):
 
     global frames_to_debug
 
@@ -77,9 +81,6 @@ def process_one_frame( frame, detect_model, tile_model, tracker, tile, conf, fra
             logging.error(f"model.track error: {str(e)}")
             raise # not recoverable exception!
 
-    label = f" {label} FN#{frame_number} " if label else f" FN#{frame_number} "
-    frame = annotate_frame(frame, detections, label=label)
-  
     # Debug specific frames
     if frames_to_debug and frame_number in frames_to_debug:
         print_detections(detections,frame_number)

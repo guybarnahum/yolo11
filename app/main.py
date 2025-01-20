@@ -47,7 +47,7 @@ from yolo11 import process_one_frame
 from job_queue import enqueue_inspection_job
 
 from trackers.deepsort.tracker import setup as deepsort_setup
-from utils import build_name, cuda_device, setup_model, print_loggers
+from utils import annotate_frame, build_name, cuda_device, setup_model
 
 load_dotenv()
 app = FastAPI()
@@ -139,14 +139,17 @@ def process_video(  model_path, process_one_frame_func,
                                                     detect_model, tile_model, tracker, 
                                                     tile, conf, 
                                                     frame_number=frame_ix, 
-                                                    device=device,
-                                                    label=model_label)
+                                                    device=device)
         
         # Enqueue detections that need further inspection
         for detection in detections:
             if detection.inspect:
                 enqueue_inspection_job( detection, frame=im0, video_path=input_path, aync_job_queue=aync_job_queue)
 
+        # annotae the frame after inspection job
+        label = f" {model_label} FN#{frame_ix} "
+        annotate_frame(im0, detections, label=label)
+  
         out.write(im0)
 
         if dataset:

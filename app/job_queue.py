@@ -8,7 +8,8 @@ from rq.job import Job
 import logging
 import os
 
-from features.car.inspect import inspect as inspect_car_features
+from features.car.inspect    import inspect as inspect_car_features
+from features.person.inspect import inspect as inspect_person_features
 
 # Get Redis configuration from environment variables or use defaults
 REDIS_HOST = os.getenv('REDIS_HOST', 'redis')  # Use 'redis' as default hostname in Docker
@@ -47,6 +48,8 @@ def inspection_job(detection, frame, video_path):
    
     if detection.name == 'car':
         inspect_car_features(detection, frame, video_path)
+    if detection.name == 'person':
+        inspect_person_features(detection, frame, video_path)
     else:
         logging.error(f"can't inspect detection type :{detection.name}")
 

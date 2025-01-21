@@ -291,12 +291,12 @@ def print_detections(detections, frame_number = None):
         print(f">>>>>>>>>>>>>>>>>>>>> Frame {frame_number} <<<<<<<<<<<<<<<<<<<<<")
 
     for ix, d in enumerate(detections):
-        conf = round(d.conf,2)
+        conf = float(d.conf)
         bbox = [round(num, 2) for num in d.bbox]
         if d.track_id:
-            print(f"{ix}> {d.track_id},{d.name},{bbox},{conf}")
+            print(f"{ix}> {d.track_id},{d.name},{bbox},{conf:.2f}")
         else:
-            print(f"{ix}> {d.name},{bbox},{conf}")
+            print(f"{ix}> {d.name},{bbox},{conf:.2f}")
 
 
 frames_to_debug = None # [1,2,3,4,5] 

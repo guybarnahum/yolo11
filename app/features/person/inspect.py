@@ -4,7 +4,12 @@ import logging
 from types import SimpleNamespace
 from utils import cuda_device, print_detections, annotate_frame
 
-face_inspect_model = cv2.FaceDetectorYN.create('./models/face_detection_yunet_2023mar.onnx','', input_size=(320, 320))
+topK = 1
+face_inspect_model = cv2.FaceDetectorYN.create( './models/face_detection_yunet_2023mar.onnx',  # Path to ONNX model
+                                                '',                     # No configuration file
+                                                input_size=(320, 320),  # Input size for the model
+                                                top_k=topK              # Number of top faces to return
+                                            )
 
 def person_face( pr_frame, min_score = 0.7 ):
     
@@ -15,7 +20,7 @@ def person_face( pr_frame, min_score = 0.7 ):
     face_inspect_model.setInputSize((w, h))
 
     # Getting detections
-    result_num, results = face_inspect_model.detect(pr_frame)
+    _ , results = face_inspect_model.detect(pr_frame)
     faces = []
 
     # if results and isinstance(results[1], list ) : # model generates (1,None) results..
@@ -114,5 +119,5 @@ def inspect(person_detection, frame, video_path):
             detections.append( detection )     
    
     if len(detections):
-        print_detections( detections )
+        print_detections( detections, frame_number = person_detection.frame_number )
         annotate_frame(frame, detections)

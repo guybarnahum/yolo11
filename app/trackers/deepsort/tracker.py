@@ -22,7 +22,7 @@ deepsort_tracker = None
 def setup(embedder = None,embedder_wts=None):
 
     device = cuda_device()
-    
+
     # Examples:          
     # embedder='clip_ViT-B/16',
     # embedder_wts='./trackers/deepsort/clip_ViT-B-16.pt' OR None
@@ -35,7 +35,7 @@ def setup(embedder = None,embedder_wts=None):
     # Look for embedder_wts
     base_name = embedder_wts if embedder_wts else embedder.replace("/", "-")
     embedder_wts_paths = []
-    embedder_wts_base_paths = ['','./trackers/deepsort/embedder_ws', '.']
+    embedder_wts_base_paths = ['','./models/embedders', '.']
 
     for base_path in embedder_wts_base_paths:
         embedder_wts_paths.append( os.path.join(base_path,base_name) )

@@ -1,0 +1,4 @@
+# Ignore everything except code and Dockerfile
+**/*
+!Dockerfile
+!fiftyone_app.py

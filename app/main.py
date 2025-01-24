@@ -11,6 +11,7 @@ import traceback
 # Protect Root logger from crazy libraries ( such as ) who set root logger and 
 # affect global logging levels.
 #
+loggers_to_print = ['root','rq_worker']
 original_setLevel = logging.Logger.setLevel
 
 # Create a wrapper that logs who called setLevel
@@ -20,7 +21,7 @@ def setLevel_with_trace(self, level):
     if ( self.name == 'root' and level != root_logging_level ):
         return
 
-    if self.name == 'root':
+    if self.name in loggers_to_print:
         print(f"Logger {self.name} level being set to {logging.getLevelName(level)}")
         # print("Called from:")
         # traceback.print_stack() # discover who is setting the logger

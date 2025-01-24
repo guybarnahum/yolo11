@@ -1,0 +1,11 @@
+cython
+python-dotenv
+fastapi
+ffmpeg-python
+fiftyone
+lapx>=0.5.2
+opencv-python-headless
+redis
+rq
+tqdm
+uvicorn

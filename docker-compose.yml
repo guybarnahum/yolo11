@@ -2,16 +2,20 @@ services:
 
   fastapi:
     build:
-      context: .
+      context: ./app
       dockerfile: Dockerfile
     container_name: yolo11-tracker
     volumes:
-      - ./input:/app/input        # Map input directory
-      - ./output:/app/output      # Map output directory
-      - ./models:/app/models      # Map models directory
-      - ./models/easyocr:/root/.EasyOCR/model # Mount easyocr model dir to retain it
-      - ./models/paddleocr:/root/.paddleocr/whl   # Persistent cache directory
-      - pip-cache:/pip_cache      # Mount pip cache directory
+      # Map input, output, models directory
+      - ./input:/app/input 
+      - ./output:/app/output
+      - ./models:/app/models
+      # Persistent cache directories below - download once
+      - ./models/easyocr:/root/.EasyOCR/model 
+      - ./models/paddleocr:/root/.paddleocr/whl   
+      - ./models/mediapipe:/usr/local/lib/python3.11/site-packages/mediapipe/modules
+      # # Mount pip cache directory for faster image builds
+      - pip-cache:/pip_cache      
     ports:
       - "8080:8080"               # Expose FastAPI port
     environment:
@@ -26,10 +30,10 @@ services:
 
   #fiftyone:
   #  build:
-  #    context: .
-  #    dockerfile: Dockerfile_fiftyone
+  #    context: ./fiftyone
+  #    dockerfile: Dockerfile
   #  volumes:
-  #    - ./fiftyone_output:/app/fiftyone_output  # Use a separate volume for FiftyOne
+  #    - ./fiftyone_output:/app/output/fiftyone_output  # Use a separate volume for FiftyOne
   #    - ./output:/app/output                    # Map output directory
   #  ports:
   #    - "5151:5151"
@@ -40,21 +44,18 @@ services:
   #  depends_on:
   #    - mongo
   
-  worker:
+  rq_worker:
     build:
-      context: .
-    volumes:
-      - ./models:/app/models
-      - ./input:/app/input
-      - ./output:/app/output
+      context: ./rq_worker
+      dockerfile: Dockerfile
     environment:
       - REDIS_HOST=redis
       - QUEUE_NAME=detection-inspection-queue
-      - LOG_LEVEL=INFO # or DEBUG, INFO, WARNING, ERROR, CRITICAL
+      - LOG_LEVEL=WARNING # or DEBUG, INFO, WARNING, ERROR, CRITICAL
     depends_on:
       - redis
       - fastapi
-    command: python job_queue_worker.py
+    command: ["python", "rq_worker.py"]
     # restart: on-failure
     stop_signal: SIGTERM  # Graceful shutdown signal
 

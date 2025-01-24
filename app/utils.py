@@ -96,6 +96,64 @@ class frameAnnotator(Annotator):
         self.text((text_x, text_y), text, txt_color=txt_color, box_style=box_style)
 
 
+def coco_pose_keypoint_name(index):
+    """
+    Returns the name of the keypoint based on the COCO keypoint format.
+
+    Args:
+        index (int): Index of the keypoint (0-based).
+
+    Returns:
+        str: Name of the keypoint if valid, otherwise 'Invalid keypoint index'.
+    """
+    coco_keypoints = [
+        "Nose", 
+        "Left Eye", 
+        "Right Eye", 
+        "Left Ear", 
+        "Right Ear", 
+        "Left Shoulder", 
+        "Right Shoulder", 
+        "Left Elbow", 
+        "Right Elbow", 
+        "Left Wrist", 
+        "Right Wrist", 
+        "Left Hip", 
+        "Right Hip", 
+        "Left Knee", 
+        "Right Knee", 
+        "Left Ankle", 
+        "Right Ankle"
+    ]
+    
+    if 0 <= index < len(coco_keypoints):
+        return coco_keypoints[index]
+    else:
+        return "Unknown"
+
+
+COCO_SKELETON = [
+    (0, 1),  # Nose -> Left Eye
+    (0, 2),  # Nose -> Right Eye
+    (1, 3),  # Left Eye -> Left Ear
+    (2, 4),  # Right Eye -> Right Ear
+    (0, 5),  # Nose -> Left Shoulder
+    (0, 6),  # Nose -> Right Shoulder
+    (5, 6),  # Left Shoulder -> Right Shoulder
+    (5, 7),  # Left Shoulder -> Left Elbow
+    (7, 9),  # Left Elbow -> Left Wrist
+    (6, 8),  # Right Shoulder -> Right Elbow
+    (8, 10), # Right Elbow -> Right Wrist
+    (5, 11), # Left Shoulder -> Left Hip
+    (6, 12), # Right Shoulder -> Right Hip
+    (11, 12),# Left Hip -> Right Hip
+    (11, 13),# Left Hip -> Left Knee
+    (13, 15),# Left Knee -> Left Ankle
+    (12, 14),# Right Hip -> Right Knee
+    (14, 16) # Right Knee -> Right Ankle
+]
+
+
 def bbox_iou(bbox1, bbox2):
     """
     Calculate the Intersection over Union (IoU) of two bounding boxes.
@@ -161,9 +219,9 @@ def non_max_suppression(detections, iou_threshold=0.5):
 
 def map_cls_id_build( cls_dict ):
     '''
-    Yolo sometimes confuses cars with bicycle, motorcycle, etc 
+    Yolo sometimes confuses cars with trucks, buses, etc 
     '''
-    cls_id_car_types = ["bicycle","motorcycle","bus","train","truck","boat","van"]
+    cls_id_car_types = [ "bus", "train", "truck", "boat", "van" ]
     cls_id_car       = None
     cls_id_car_list  = []
 
@@ -300,6 +358,43 @@ def print_detections(detections, frame_number = None):
 
 
 frames_to_debug = None # [1,2,3,4,5] 
+
+def annotate_frame_pose_keypoints( frame, persons, kpt_color = None, edge_color = None, min_conf = 0.5, skeleton = True  ):
+
+    # initialize annotator for plotting masks
+    annotator = frameAnnotator(frame, line_width=2)
+    frame_w = int(frame.shape[1])
+    frame_h = int(frame.shape[0])
+    
+    if not kpt_color : kpt_color  = (  0, 255,   0)
+    if not edge_color: edge_color = (255, 255, 255)
+
+    try:
+        for person_keypoints in persons:
+            
+            circles = {}
+            
+            for keypoint in person_keypoints:
+                ix, name, x, y, conf = keypoint
+                if conf > min_conf:  
+                    cv2.circle(frame, (int(x), int(y)), radius=5, color=kpt_color, thickness=-1)
+                    circles[ix] = (int(x),int(y))
+
+            if skeleton:
+                for from_ix, to_ix in COCO_SKELETON:
+                    if from_ix in circles and to_ix in circles:
+
+                        from_point = circles[ from_ix ]
+                        to_point   = circles[ to_ix   ]
+
+                        cv2.line(frame, from_point, to_point, color=edge_color, thickness = 2)
+
+    except Exception as e:
+        logging.error(f'annotate_frame_pose_keypoints - Error : {str(e)}')
+        logging.info (f'annotate_frame_pose_key - persons {persons}')
+
+    return frame
+
 
 def annotate_frame(frame, detections, label = None):
     

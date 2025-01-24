@@ -48,7 +48,7 @@ def inspection_job(detection, frame, video_path):
    
     if detection.name == 'car':
         inspect_car_features(detection, frame, video_path)
-    if detection.name == 'person':
+    elif detection.name == 'person':
         inspect_person_features(detection, frame, video_path)
     else:
         logging.error(f"can't inspect detection type :{detection.name}")

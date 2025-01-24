@@ -13,8 +13,9 @@ def ocr_paddle_read(self, lp_frame):
     if results:   
         try:
             for result in results[0]:
-                text, score = result[1]
-                lps.append([text, score])
+                if result:
+                    text, score = result[1]
+                    lps.append([text, score])
 
         except Exception as e:
             logging.error(f"Error ocr_paddle_read - {str(e)}")

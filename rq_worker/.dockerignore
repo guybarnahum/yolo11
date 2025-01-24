@@ -1,0 +1,4 @@
+# Ignore everything except code and Dockerfile
+**/*
+!Dockerfile
+!rq_worker.py

@@ -25,7 +25,7 @@ def setup(embedder = None,embedder_wts=None):
 
     # Examples:          
     # embedder='clip_ViT-B/16',
-    # embedder_wts='./trackers/deepsort/clip_ViT-B-16.pt' OR None
+    # embedder_wts='./models/embedders/clip_ViT-B-16.pt' OR None
     # OR
     # embedder='torchreid',
     # embedder_wts='osnet_ain_x1_0_imagenet.pth' OR 'osnet_ain_x1_0_imagenet'
@@ -51,11 +51,11 @@ def setup(embedder = None,embedder_wts=None):
             embedder_wts = None
             break
 
-        logging.debug(f"Looking for {embedder_wts_path}")
+        logging.info(f"Looking for {embedder_wts_path}")
 
         if os.path.isfile(embedder_wts_path):
             embedder_wts = embedder_wts_path
-            logging.debug(f'located embedder weights at {embedder_wts}')
+            logging.info(f'located embedder weights at {embedder_wts}')
             break
 
     logging.info( f"Using embedder_wts : {embedder_wts}")

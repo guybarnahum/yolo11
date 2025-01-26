@@ -1,13 +1,16 @@
+# PyTorch
+torch
+torchvision
+torchreid
+
+# PaddlePaddle, TensorBoard (Ensure Python 3.11 support) is installed beforehand 
+paddleocr
+
+# Additional libraries
 cython
 easyocr
 deep-sort-realtime
 gdown
 openai-clip
-paddlepaddle
-paddleocr
 sahi
-tensorboard
-torch
-torchreid
-torchvision
-transformers
+# transformers

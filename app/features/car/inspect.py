@@ -1,7 +1,8 @@
 import cv2
 import logging
 from types import MethodType
-from utils import setup_model, cuda_device, flatten_results, print_detections, annotate_frame
+from utils import setup_model, cuda_device, flatten_results, print_detections, annotate_frame, annotate_frame_text
+from .pose import detect_pose, detect_pose_from_bbox
 
 car_inspect_model,_ = setup_model('./models/license_plate_detector.pt')
 
@@ -10,7 +11,7 @@ def ocr_paddle_read(self, lp_frame):
     logging.debug(f'ocr_paddle_read: results {results}')
 
     lps = []
-    if results:   
+    if results and results[0]:  # Check if results and results[0] are not None
         try:
             for result in results[0]:
                 if result:
@@ -141,7 +142,7 @@ def should_inspect(detection):
     '''
     Criteria for inspection 
     '''
-    return detection.area > 500 * 500
+    return detection.area > 400 * 400
 
 
 def inspect(car_detection, frame, video_path):
@@ -155,6 +156,17 @@ def inspect(car_detection, frame, video_path):
 
     x1, y1, x2, y2 = car_detection.bbox
     car_frame = frame[ int(y1): int(y2), int(x1): int(x2), :]
+
+    yaw = detect_pose(car_detection,car_frame)
+    yaw_from_bbox = detect_pose_from_bbox( car_detection.bbox )
+    text = f'yaw:{yaw:.2f},{yaw_from_bbox}'
+
+    logging.debug(f'features.car.inspect {text}')
+    width  = x2 - x1
+    height = y2 - y1
+
+    position = ( x1 + 3, y1 + 30 )
+    annotate_frame_text( frame, text, position)
 
     results = car_inspect_model.predict( source=car_frame,
                                          verbose=False,

@@ -2,11 +2,12 @@ import logging
 import cv2
 import os
 
+import numpy as np
+
 from ultralytics import YOLO
 from ultralytics.utils.plotting import Annotator, colors
 
 from sahi import AutoDetectionModel
-from sahi.predict import get_sliced_prediction
 
 from types import SimpleNamespace, MethodType
 from torch import cuda
@@ -130,7 +131,6 @@ def coco_pose_keypoint_name(index):
         return coco_keypoints[index]
     else:
         return "Unknown"
-
 
 COCO_SKELETON = [
     (0, 1),  # Nose -> Left Eye
@@ -358,6 +358,35 @@ def print_detections(detections, frame_number = None):
 
 
 frames_to_debug = None # [1,2,3,4,5] 
+
+def annotate_frame_text(frame, text, position, color=None, font_scale = 0.75, thickness = 1):
+    if not color:
+        color = (0, 255, 0)  # Text color in BGR (green)
+    
+    # Ensure frame is numpy array
+    if not isinstance(frame, np.ndarray):
+        raise TypeError("Frame must be a numpy array")
+    
+    # Ensure text is string
+    text = str(text)
+    
+    # Ensure position is tuple of integers
+    position = tuple(map(int, position))
+    
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    
+    cv2.putText(
+        frame, 
+        text, 
+        position, 
+        font, 
+        font_scale, 
+        color, 
+        thickness, 
+        cv2.LINE_AA
+    )
+    
+    return frame
 
 def annotate_frame_pose_keypoints( frame, persons, kpt_color = None, edge_color = None, min_conf = 0.5, skeleton = True  ):
 

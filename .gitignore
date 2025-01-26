@@ -10,8 +10,7 @@ output/
 models/easyocr/
 models/paddleocr/
 models/embedders/
-models/mediapipe/
-
+models/torch/
 # C extensions
 *.so
 

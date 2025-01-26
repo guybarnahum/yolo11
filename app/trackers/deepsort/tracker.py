@@ -31,43 +31,55 @@ def setup(embedder = None,embedder_wts=None):
     # embedder_wts='osnet_ain_x1_0_imagenet.pth' OR 'osnet_ain_x1_0_imagenet'
 
     global deepsort_tracker
-
+    
+    if embedder :
     # Look for embedder_wts
-    base_name = embedder_wts if embedder_wts else embedder.replace("/", "-")
-    embedder_wts_paths = []
-    embedder_wts_base_paths = ['','./models/embedders', '.']
+        base_name = embedder_wts if embedder_wts else embedder.replace("/", "-")
+        embedder_wts_paths = []
+        embedder_wts_base_paths = ['','./models/embedders', '.']
 
-    for base_path in embedder_wts_base_paths:
-        embedder_wts_paths.append( os.path.join(base_path,base_name) )
-        embedder_wts_paths.append( os.path.join(base_path,base_name +'.pt') )
-        embedder_wts_paths.append( os.path.join(base_path,base_name +'.pth') )
+        for base_path in embedder_wts_base_paths:
+            embedder_wts_paths.append( os.path.join(base_path,base_name) )
+            embedder_wts_paths.append( os.path.join(base_path,base_name +'.pt') )
+            embedder_wts_paths.append( os.path.join(base_path,base_name +'.pth') )
 
-    embedder_wts_paths.append( None ) # Mark the end of places to try
+        embedder_wts_paths.append( None ) # Mark the end of places to try
 
-    for embedder_wts_path in embedder_wts_paths:
-        
-        if not embedder_wts_path:
-            logging.warning(f'Could not locate embedder weights')
-            embedder_wts = None
-            break
+        for embedder_wts_path in embedder_wts_paths:
+            
+            if not embedder_wts_path:
+                logging.warning(f'Could not locate embedder weights')
+                embedder_wts = None
+                break
 
-        logging.info(f"Looking for {embedder_wts_path}")
+            logging.info(f"Looking for {embedder_wts_path}")
 
-        if os.path.isfile(embedder_wts_path):
-            embedder_wts = embedder_wts_path
-            logging.info(f'located embedder weights at {embedder_wts}')
-            break
+            if os.path.isfile(embedder_wts_path):
+                embedder_wts = embedder_wts_path
+                logging.info(f'located embedder weights at {embedder_wts}')
+                break
 
-    logging.info( f"Using embedder_wts : {embedder_wts}")
+        logging.info( f"Using embedder_wts : {embedder_wts}")
 
-    # Setup DeepSort tracker
-    deepsort_tracker = DeepSort(max_age=900, # 900 frames or 30 sec memory
-                                max_iou_distance=1.0,
-                                nn_budget=200,
-                                embedder=embedder,
-                                embedder_wts=embedder_wts,
-                                embedder_gpu= device != 'cpu'
-                        )
+        # Setup DeepSort tracker
+        try:
+            deepsort_tracker = DeepSort(max_age=900, # 900 frames or 30 sec memory
+                                    max_iou_distance=1.0,
+                                    nn_budget=200,
+                                    embedder=embedder,
+                                    embedder_wts=embedder_wts,
+                                    embedder_gpu= device != 'cpu'
+                                )
+        except Exception as e:
+            logging.error(f"Model loading error: {e}", exc_info=True)
+
+    else:
+        # Setup DeepSort tracker
+        deepsort_tracker = DeepSort(max_age=900, # 900 frames or 30 sec memory
+                                    max_iou_distance=1.0,
+                                    nn_budget=200
+                                )  
+
 
 
 def yolo_to_ltwh(xyxy):

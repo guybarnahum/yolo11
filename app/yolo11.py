@@ -2,6 +2,8 @@ import logging
 from features.car.inspect    import should_inspect as should_inspect_car
 from features.person.inspect import should_inspect as should_inspect_person
 
+from sahi.predict import get_sliced_prediction
+
 from trackers.deepsort.tracker import track as deepsort_track
 from utils import print_detections, flatten_results
 

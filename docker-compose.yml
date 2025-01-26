@@ -14,6 +14,7 @@ services:
       - ./models/easyocr:/root/.EasyOCR/model 
       - ./models/paddleocr:/root/.paddleocr/whl   
       - ./models/mediapipe:/usr/local/lib/python3.11/site-packages/mediapipe/modules
+      - ./models/torch:/root/.cache/torch
       # # Mount pip cache directory for faster image builds
       - pip-cache:/pip_cache      
     ports:

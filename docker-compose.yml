@@ -10,6 +10,7 @@ services:
       - ./input:/app/input 
       - ./output:/app/output
       - ./models:/app/models
+      - ./datasets:/app/datasets
       # Persistent cache directories below - download once
       - ./models/easyocr:/root/.EasyOCR/model 
       - ./models/paddleocr:/root/.paddleocr/whl   

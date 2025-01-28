@@ -2,7 +2,7 @@ import cv2
 import logging
 from types import MethodType
 from utils import setup_model, cuda_device, flatten_results, print_detections, annotate_frame, annotate_frame_text
-from .pose import detect_pose, detect_pose_from_bbox
+from .pose import detect_pose_from_bbox, pose_car_yaw
 
 car_inspect_model,_ = setup_model('./models/license_plate_detector.pt')
 
@@ -156,12 +156,25 @@ def inspect(car_detection, frame, video_path):
 
     x1, y1, x2, y2 = car_detection.bbox
     car_frame = frame[ int(y1): int(y2), int(x1): int(x2), :]
-
+    
+    '''
     yaw = detect_pose(car_detection,car_frame)
     yaw_from_bbox = detect_pose_from_bbox( car_detection.bbox )
     text = f'yaw:{yaw:.2f},{yaw_from_bbox}'
 
     logging.debug(f'features.car.inspect {text}')
+    width  = x2 - x1
+    height = y2 - y1
+
+    position = ( x1 + 3, y1 + 30 )
+    annotate_frame_text( frame, text, position)
+    '''
+
+    yaw, conf = pose_car_yaw(car_detection, car_frame)
+    text = f'yaw:{yaw},{conf:.3f}'
+
+    logging.info(f'features.car.inspect {text}')
+
     width  = x2 - x1
     height = y2 - y1
 

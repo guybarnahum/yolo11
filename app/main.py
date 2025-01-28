@@ -394,6 +394,26 @@ async def process_video_in_background(
     return {"message": "Video processing started in the background"}
 
 
+@app.get("/train")
+async def train_model(
+    background_tasks: BackgroundTasks,
+    model:str,
+    dataset_path: str,
+    model_wts: Optional[str] = None
+):
+    if model == 'car_yaw':
+        from features.car.yaw_model import train
+    else:
+        return {"message": "Unknown model `{model}` is unsupported" }
+
+    # Add the background task
+    background_tasks.add_task(
+        train,
+        dataset_path,
+        model_weights_path=model_wts
+    )
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

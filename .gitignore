@@ -6,11 +6,17 @@ __pycache__/
 # YOLO
 input/
 output/
+datasets/
 
 models/easyocr/
 models/paddleocr/
 models/embedders/
+
 models/torch/
+
+# Re-add model weights we need in torch
+!models/torch/yaw_model_weights.pth
+
 # C extensions
 *.so
 

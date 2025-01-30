@@ -1,15 +1,15 @@
+import logging
+import os
 import time
+
 from redis import Redis
 from redis.exceptions import ConnectionError
 
 from rq import Queue
 from rq.job import Job
 
-import logging
-import os
-
-from features.car.inspect    import inspect as inspect_car_features
-from features.person.inspect import inspect as inspect_person_features
+# Jobs: inspect
+from features.inpect import inspect
 
 # Get Redis configuration from environment variables or use defaults
 REDIS_HOST = os.getenv('REDIS_HOST', 'redis')  # Use 'redis' as default hostname in Docker
@@ -44,18 +44,9 @@ def get_redis_connection():
 redis_conn = get_redis_connection()
 detection_inspection_queue = Queue('detection-inspection-queue', connection=redis_conn)
 
-def inspection_job(detection, frame, video_path):
-   
-    if detection.name == 'car':
-        inspect_car_features(detection, frame, video_path)
-    elif detection.name == 'person':
-        inspect_person_features(detection, frame, video_path)
-    else:
-        logging.error(f"can't inspect detection type :{detection.name}")
-
-    logging.debug(f"inspection_job ended for {detection}")
-
-
+#
+# Callers of enqueue_inspection_job should get aync_job_queue from os.getenv('JOB_QUEUE', False)
+#
 def enqueue_inspection_job( detection, frame = None, video_path = None, aync_job_queue = False ):
     
     job_id = None
@@ -65,7 +56,7 @@ def enqueue_inspection_job( detection, frame = None, video_path = None, aync_job
         try:
 
             job = detection_inspection_queue.enqueue(
-                inspection_job,
+                inspect,
                 detection,
                 frame,
                 video_path,
@@ -87,7 +78,7 @@ def enqueue_inspection_job( detection, frame = None, video_path = None, aync_job
 
             logging.error(f"Error enqueue_inspection_job : {str(e)}")
 
-    else: # Call synchronously
-        inspection_job( detection, frame, video_path )
+    else: # Call synchronously 
+        inspect( detection, frame, video_path )
 
     return job_id, job_status

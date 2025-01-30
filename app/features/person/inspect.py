@@ -88,7 +88,6 @@ def face_to_detection( face, offset_x = 0, offset_y = 0, frame_number = None ):
     if area < 0 : area = - area
 
     detection = SimpleNamespace()
-
     detection.bbox = [offset_x+face_x1, offset_y+face_y1, offset_x+face_x2, offset_y+face_y2]
     detection.conf = conf
     detection.cls_id = 0
@@ -96,8 +95,9 @@ def face_to_detection( face, offset_x = 0, offset_y = 0, frame_number = None ):
     detection.area = area
     detection.frame_number =  frame_number or -1
     detection.inspect = False
+    detection.attributes = []
     detection.mask = None
-    detection.guid = None
+    detection.detail = None
     detection.track_id = None
 
     return detection
@@ -138,7 +138,7 @@ def inspect_pose(person_detection, person_frame, video_path, offset_x = 0, offse
             return persons
     
     except AttributeError as e: 
-        logging.warning(f'inspect_pose :{str(e)}')
+        logging.debug(f'inspect_pose :{str(e)}')
 
     except Exception as e:
         logging.error(f'inspect_pose Error: {str(e)}')
@@ -158,16 +158,15 @@ def inspect(person_detection, frame, video_path):
     pr_frame = frame[ int(y1): int(y2), int(x1): int(x2), :]
 
     faces = person_face(pr_frame)
-    detections = []
+    face_detections = []
 
     if faces :
         for face in faces:
             detection = face_to_detection( face, offset_x = x1, offset_y = y1, frame_number = person_detection.frame_number )
-            detections.append( detection )     
+            detection.track_id = person_detection.track_id
+            face_detections.append( detection )     
     
     persons = inspect_pose(person_detection, pr_frame, video_path, offset_x = x1, offset_y = y1)
     frame = annotate_frame_pose_keypoints( frame, persons )
-
-    if len(detections):
-        print_detections( detections, frame_number = person_detection.frame_number )
-        annotate_frame(frame, detections)
+    
+    return face_detections

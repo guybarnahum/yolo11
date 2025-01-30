@@ -1,70 +1,73 @@
 import logging
 
-# Set Root Logger level
+'''
+    Logging setLevel Hack!
+
+    We have a problem of roug modules (paddles?) who set the root Logger to WARNING, overriding our level.
+    Below, is a special setLevel that denies the change the level and blames those who try to set it.
+
+'''
+import inspect # to blame culprit
+
 root_logging_level = logging.INFO
+_setLevel = logging.getLogger().setLevel 
+
+def setLevel_locked(level):
+    if level != root_logging_level:
+
+        # Walk up the call stack to find the real culprit
+        frame = inspect.currentframe()
+        caller_frame = frame.f_back
+        module  = inspect.getmodule(caller_frame)
+        culprit = module.__name__
+
+        logging.warning(f"🚨 WARNING: Denied attempt of ({culprit}) to change the root logger level to {logging.getLevelName(level)}")
+        return # do noting - logger is lock to changes
+
+    _setLevel(level)
+
+
+# Patch the root logger
+logging.getLogger().setLevel = setLevel_locked
+
+# Set Root Logger level - basicConfig still works
 logging.basicConfig(level=root_logging_level, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
-from functools import wraps
-import traceback
-
-#
-# Protect Root logger from crazy libraries ( such as ) who set root logger and 
-# affect global logging levels.
-#
-loggers_to_print = ['root','rq_worker']
-original_setLevel = logging.Logger.setLevel
-
-# Create a wrapper that logs who called setLevel
-@wraps(original_setLevel)
-def setLevel_with_trace(self, level):
-    
-    if ( self.name == 'root' and level != root_logging_level ):
-        return
-
-    if self.name in loggers_to_print:
-        print(f"Logger {self.name} level being set to {logging.getLevelName(level)}")
-        # print("Called from:")
-        # traceback.print_stack() # discover who is setting the logger
-
-    return original_setLevel(self, level)
-
-# Replace the original method with our traced version
-logging.Logger.setLevel = setLevel_with_trace
+'''
+    END of Logging Hack 
+'''
 
 import cv2
 from dotenv import load_dotenv
 import importlib
 
-from fastapi import BackgroundTasks, FastAPI
+from fastapi import BackgroundTasks, FastAPI, Query
 import fiftyone as fo
 
 import os
+from pathlib import Path
 import time
 from tqdm import tqdm #select best for enviroment
 from typing import Optional
 
 from compress_video import compress_video_to_size, compress_video_to_bitrate, get_bitrate, calculate_bit_rate
 from yolo11 import process_one_frame
-from job_queue import enqueue_inspection_job
+from features.inspect import inspect
 
 from trackers.deepsort.tracker import setup as deepsort_setup
-from utils import annotate_frame, build_name, cuda_device, setup_model
+from utils import annotate_frame, build_name, cuda_device, setup_model, print_detections
+from cvat import cvat_init, cvat_add_frame, cvat_save
 
 load_dotenv()
 app = FastAPI()
-
-aync_job_queue = os.getenv('JOB_QUEUE', False)
 
 def process_video(  model_path, process_one_frame_func, 
                     input_path, output_path, dataset_path=None,
                     tracker=None, embedder = None, embedder_wts = None,
                     tile=None, 
                     start_ms=None, end_ms=None, conf=None,
-                    image_size=1088
+                    cvat=False
                 ):
-    root_level = logging.getLogger().level
-    print(f"Logger Root, Level: {logging.getLevelName(root_level)}")
-
     """
     Main video processing process
     """
@@ -102,10 +105,6 @@ def process_video(  model_path, process_one_frame_func,
     if dataset:
         sample = fo.Sample(filepath=input_path)
    
-    # Load models from the config
-    detect_model, tile_model = setup_model(model_path, tile, image_size=image_size, build_cls_map=True)
-    logging.info(f"detect-model: {model_path}, tile: {tile}, conf: {conf} device: {device}")
-
     # Video capture
     cap = cv2.VideoCapture(input_path)
     if not cap.isOpened():
@@ -116,7 +115,12 @@ def process_video(  model_path, process_one_frame_func,
     w, h, fps = (int(cap.get(x)) for x in (cv2.CAP_PROP_FRAME_WIDTH, 
                                            cv2.CAP_PROP_FRAME_HEIGHT, 
                                            cv2.CAP_PROP_FPS))
+
     out = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*"MJPG"), fps, (w, h))
+
+    # Load models from the config
+    detect_model, tile_model = setup_model(model_path, tile, image_size=w, build_cls_map=True)
+    logging.info(f"detect-model: {model_path}, tile: {tile}, conf: {conf} device: {device}")
 
     # Frame calculations
     start_frame = int(start_ms * fps / 1000) if start_ms else 0   
@@ -131,6 +135,10 @@ def process_video(  model_path, process_one_frame_func,
 
     cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
 
+    if cvat:
+        input_name = Path(input_path).stem
+        cvat_json = cvat_init(name=input_name,video_path=input_path)
+
     for frame_ix in range(start_frame, end_frame):
         ret, im0 = cap.read()
         if not ret:
@@ -143,14 +151,25 @@ def process_video(  model_path, process_one_frame_func,
                                                     device=device)
         
         # Enqueue detections that need further inspection
+        features = []
+
         for detection in detections:
             if detection.inspect:
-                enqueue_inspection_job( detection, frame=im0, video_path=input_path, aync_job_queue=aync_job_queue)
+                detection_features = inspect( detection, frame=im0, video_path=input_path)
+                if detection_features:
+                    features.extend(detection_features)
+                
+        detections.extend(features)
+
+        # print_detections( detections )
 
         # annotae the frame after inspection job
         label = f" {model_label} FN#{frame_ix} "
         annotate_frame(im0, detections, label=label)
-  
+
+        if  cvat:
+            cvat_json = cvat_add_frame(frame_ix, detections, cvat_json)
+
         out.write(im0)
 
         if dataset:
@@ -182,9 +201,12 @@ def process_video(  model_path, process_one_frame_func,
 
         progress_bar.update(1)
     
+    if  cvat:
+        cvat_json_path = Path(output_path).with_suffix('.json')
+        cvat_save(cvat_json, cvat_json_path)
+
     # Add the sample to the dataset and save
     if dataset:
-        
         logging.info("Adding sample to dataset")
         dataset.add_sample(sample)
         sample.save()
@@ -227,7 +249,7 @@ def run_process_video(  model_path, input_path, output_path, dataset_path=None,
                         tile=None, 
                         start_ms=None, end_ms=None, 
                         conf=None,
-                        image_size=1088
+                        cvat=False
                     ):
     """
     Background task to run the process_video function.
@@ -259,7 +281,7 @@ def run_process_video(  model_path, input_path, output_path, dataset_path=None,
                         tile, 
                         start_ms, end_ms,
                         conf,
-                        image_size)
+                        cvat)
 
         if target == ".mp4": 
             video_bitrate, audio_bitrate = get_bitrate(input_path)
@@ -285,7 +307,7 @@ def run_process_video(  model_path, input_path, output_path, dataset_path=None,
         traceback.print_exc()
 
 
-usage = '''Usage : http://localhost:8080/process?config_name=yolo11_sliced&input_path=./input/videoplayback.mp4&output_path=./output&start_ms=180000&end_ms=182000&image_size=1088
+usage = '''Usage : http://localhost:8080/process?config_name=yolo11_sliced&input_path=./input/videoplayback.mp4&output_path=./output&start_ms=180000&end_ms=182000
         Supported configurations : yolo11_sliced | yolo11
         Mapped voiumes: input, output and models
         To (re)start : docker-reset.sh
@@ -355,12 +377,14 @@ async def process_video_in_background(
     end_ms: Optional[int] = None,
     start: Optional[int] = 0,
     end: Optional[int] = None,
-    conf: Optional[float] = None,
-    image_size: Optional[int] = 1088
-):
-    """
+    conf: Optional[float] = None,   # minimum conf for detection 
+    cvat: Optional[bool] = Query(None)  # Changed to None default
+    ):
+    '''
     Endpoint to start video processing as a background task using a GET request.
-    """
+    '''
+    use_cvat = cvat is not None
+
     # Validate the input path
     if not os.path.exists(input_path):
         return {"error": f"Input file not found: {input_path}"}
@@ -388,7 +412,7 @@ async def process_video_in_background(
         start_ms,
         end_ms,
         conf,
-        image_size
+        use_cvat
     )
 
     return {"message": "Video processing started in the background"}

@@ -118,7 +118,7 @@ def predict_yaw( yaw_model, car_frame):
         predicted_angle = yaw_model.bin_centers[max_bin].item()
         confidence = torch.max(probs, dim=1)[0].item()
 
-    print(f"Predicted Yaw Angle: {predicted_angle} degrees, Confidence: {confidence * 100:.2f}%")
+    # print(f"Predicted Yaw Angle: {predicted_angle} degrees, Confidence: {confidence * 100:.2f}%")
     return predicted_angle, confidence
 
 

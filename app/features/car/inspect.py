@@ -3,8 +3,9 @@ import logging
 from types import MethodType
 from utils import setup_model, cuda_device, flatten_results, print_detections, annotate_frame, annotate_frame_text
 from .pose import detect_pose_from_bbox, pose_car_yaw
+from cvat import spec_id
 
-car_inspect_model,_ = setup_model('./models/license_plate_detector.pt')
+license_plate_model,_ = setup_model('./models/license_plate_detector.pt')
 
 def ocr_paddle_read(self, lp_frame):
     results = self.ocr(lp_frame, cls=True)
@@ -146,65 +147,69 @@ def should_inspect(detection):
 
 
 def inspect(car_detection, frame, video_path):
-    global car_inspect_model
+    '''
+        Returns an array of detections
+    '''
+    global license_plate_model
     global ocr_reader
 
     device = cuda_device()
     if car_detection.name != 'car':
         logging.warning( f'features.car.inspect called for {car_detection}')
-        return
+        return []
 
     x1, y1, x2, y2 = car_detection.bbox
     car_frame = frame[ int(y1): int(y2), int(x1): int(x2), :]
-    
-    '''
-    yaw = detect_pose(car_detection,car_frame)
-    yaw_from_bbox = detect_pose_from_bbox( car_detection.bbox )
-    text = f'yaw:{yaw:.2f},{yaw_from_bbox}'
-
-    logging.debug(f'features.car.inspect {text}')
-    width  = x2 - x1
-    height = y2 - y1
-
-    position = ( x1 + 3, y1 + 30 )
-    annotate_frame_text( frame, text, position)
-    '''
 
     yaw, conf = pose_car_yaw(car_detection, car_frame)
-    text = f'yaw:{yaw},{conf:.3f}'
+    yaw_label = f'yaw:{yaw},{conf:.3f}'
+    logging.debug(f'features.car.inspect {yaw_label}')
+    car_detection.detail = yaw_label
 
-    logging.info(f'features.car.inspect {text}')
-
-    width  = x2 - x1
-    height = y2 - y1
-
-    position = ( x1 + 3, y1 + 30 )
-    annotate_frame_text( frame, text, position)
-
-    results = car_inspect_model.predict( source=car_frame,
-                                         verbose=False,
-                                         device=device 
-                                        )
-    if not len(results[0].boxes):
-        logging.debug( f'features.car.inspect - no license plates found' )
-        return 
-
-    # Offset detection back to original frame from car frame
-    lp_detections = flatten_results(results, frame_number=car_detection.frame_number, offset_x=x1, offset_y=y1)
+    car_detection.attributes.append({   "spec_id"   : spec_id("yaw"),
+                                        "name"      : "yaw",
+                                        "value"     : yaw
+                                    })
     
-    if ocr_reader:
+    car_detection.attributes.append({   "spec_id"   : spec_id("yaw_conf"),
+                                        "name"      : "yaw_conf",
+                                        "value"     : conf
+                                    })
+    
+    # License Plate(s)
+    results = license_plate_model.predict( source=car_frame, verbose=False, device=device )
+    lp_detections = []
+
+    if len(results[0].boxes):
+
+        # Offset detection back to original frame from car frame
+        lp_detections = flatten_results(results, frame_number=car_detection.frame_number, offset_x=x1, offset_y=y1)
+    
+        
         for lp in lp_detections:
-            # lp_detection is in original frame coordinates
-            lp_text, lp_score = read_license_plate( lp, frame )
-            if lp_text and lp_score:
-                lp_score    = round(lp_score,2)
-                lp.guid     = f"{lp_text}({lp_score:.2f})"
-                logging.info( f'read_license_plate : {lp.guid}' )
+            
+            lp.name     = "license_plate"
+            lp.track_id = car_detection.track_id
 
-    # print_detections(lp_detections, frame_number=car_detection.frame_number)
-    
-    # frame is passed by reference(!) so annottions will be written to the caller's frame.
-    # tbd how to do this aync where there is a race between the caller and the this routine, 
-    # when it is queued for futute processing
-    if len(lp_detections):
-        annotate_frame(frame, lp_detections)
+            if ocr_reader:
+                
+                lp_text, lp_score = read_license_plate( lp, frame ) # lp bbox is in frame ccordinates
+
+                if lp_text and lp_score and lp_score > 0.5:
+
+                    lp_score  = round(lp_score,2)
+                    lp.detail = f"{lp_text}({lp_score:.2f})"
+
+                    logging.debug( f'features.car.inspect detail : {lp.detail}' )
+
+                    lp.attributes.append({  "spec_id"   : spec_id("ocr_text"),
+                                            "name"      : "ocr_text",
+                                            "value"     : lp_text
+                                        })
+
+                    lp.attributes.append({  "spec_id"   : spec_id("ocr_text_conf"),
+                                            "name"      : "ocr_text_conf",
+                                            "value"     : lp_score
+                                        })
+
+    return lp_detections

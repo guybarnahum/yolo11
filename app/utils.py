@@ -333,8 +333,9 @@ def flatten_results(results, min_conf = None, frame_number = None, should_inspec
             detection.area = area
             detection.frame_number = frame_number or -1
             detection.inspect = should_inspect(detection) if should_inspect else False
+            detection.attributes = []
             detection.mask = mask
-            detection.guid = None
+            detection.detail = None
             detection.track_id = track_id
 
             detections.append( detection )
@@ -351,10 +352,12 @@ def print_detections(detections, frame_number = None):
     for ix, d in enumerate(detections):
         conf = float(d.conf)
         bbox = [round(num, 2) for num in d.bbox]
+        detail = d.detail
+
         if d.track_id:
-            print(f"{ix}> {d.track_id},{d.name},{bbox},{conf:.2f}")
+            print(f"{ix}> track_id:{d.track_id},{d.name},[{bbox}],conf:{conf:.2f}, detail:{detail}")
         else:
-            print(f"{ix}> {d.name},{bbox},{conf:.2f}")
+            print(f"{ix}> {d.name},[{bbox}],conf:{conf:.2f}, detail:{detail}")
 
 
 frames_to_debug = None # [1,2,3,4,5] 
@@ -440,10 +443,11 @@ def annotate_frame(frame, detections, label = None):
             class_label = "Unknown"
 
         track_id = detection.track_id if detection.track_id else 0
+        detail   = detection.detail
 
         detection_label = f'{class_label}({detection.conf:.2f}) '
-        if detection.guid   : detection_label = detection_label + detection.guid + ' '
-        if track_id         : detection_label = detection_label + str(track_id)
+        if detail   : detection_label = detection_label + detail + ' '
+        if track_id : detection_label = detection_label + str(track_id)
 
         # Generate a color based on the track_id
         color = colors(track_id, True)

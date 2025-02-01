@@ -20,13 +20,11 @@ def detect_pose_from_bbox(bbox):
     return yaw
 
 
-from .yaw_model  import setup_yaw_model, predict_yaw
-
-car_yaw_model = setup_yaw_model('./models/torch/yaw_model_weights.pth')
+from .yaw_model  import predict_car_yaw
 
 def pose_car_yaw(car_detection, car_frame):
-    global car_yaw_model
-    yaw = predict_yaw(car_yaw_model, car_frame)
+    
+    yaw = predict_car_yaw(car_frame)
     return yaw
 
 

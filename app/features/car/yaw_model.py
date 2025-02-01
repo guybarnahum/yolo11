@@ -108,23 +108,28 @@ def setup_yaw_model(model_wts_path=None):
     yaw_model  = yaw_model.to(device)
     yaw_model.eval() # Freeze the entire model (if no training is allowed)
 
+    logging.info(f'car_yaw_model loaded from {model_wts_path}')
     return yaw_model
 
-def predict_yaw( yaw_model, car_frame):
+car_yaw_wts_path = "./models/torch/yaw_model_weights.pth"
+car_yaw_model    = setup_yaw_model( car_yaw_wts_path ) 
+
+def predict_car_yaw(car_frame):
+
     global device
-    
-    car_frame_tensor = yaw_model.preprocess(car_frame).to(device)
+    global car_yaw_model
+
+    car_frame_tensor = car_yaw_model.preprocess(car_frame).to(device)
 
     with torch.no_grad():
-        predictions = yaw_model(car_frame_tensor)
+        predictions = car_yaw_model(car_frame_tensor)
         probs = F.softmax(predictions, dim=1)
         max_bin = torch.argmax(probs, dim=1)
-        predicted_angle = yaw_model.bin_centers[max_bin].item()
+        predicted_angle = car_yaw_model.bin_centers[max_bin].item()
         confidence = torch.max(probs, dim=1)[0].item()
 
     # print(f"Predicted Yaw Angle: {predicted_angle} degrees, Confidence: {confidence * 100:.2f}%")
     return predicted_angle, confidence
-
 
 '''
 Training CarYawEstimator
@@ -140,7 +145,6 @@ import os
 import shutil
 from torch.utils.data import Dataset, DataLoader
 from PIL import Image
-
 
 class CarYawDataset(Dataset):
     def __init__(self, root_dir, transform=None):
@@ -351,8 +355,10 @@ def train(  training_dataset_path   = None,
             num_epochs              = 30
         ):
 
+    global car_yaw_wts_path
+    
     if not model_weights_path:
-        model_weights_path = "./models/torch/yaw_model_weights.pth"
+        model_weights_path = car_yaw_wts_path 
 
     # Initialize model and optimizer
     yaw_model = CarYawEstimator().to(device)
@@ -402,8 +408,12 @@ def train(  training_dataset_path   = None,
                                     num_epochs=num_epochs,
                                     model_wts_path=model_weights_path
                                     )    
-
     
+    # load new model for us
+    car_yaw_model    = setup_yaw_model( model_weights_path ) 
+    car_yaw_wts_path = model_weights_path
+
+
 if __name__ == "__main__":
     
     train()

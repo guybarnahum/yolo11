@@ -7,6 +7,7 @@ import logging
     Below, is a special setLevel that denies the change the level and blames those who try to set it.
 
 '''
+import traceback
 import inspect # to blame culprit
 
 root_logging_level = logging.INFO
@@ -21,7 +22,7 @@ def setLevel_locked(level):
         module  = inspect.getmodule(caller_frame)
         culprit = module.__name__
 
-        logging.warning(f"⚠️ Denied attempt of ({culprit}) to change the root logger level to {logging.getLevelName(level)}")
+        logging.warning(f"⚠️  Denied attempt of ({culprit}) to change the root logger level to {logging.getLevelName(level)}")
         return # do noting - logger is lock to changes
 
     _setLevel(level)
@@ -422,7 +423,7 @@ async def process_video_in_background(
 @app.get("/train")
 async def train_model(
     background_tasks: BackgroundTasks,
-    model:str,
+    model_name:str,
     dataset_path: Optional[str] = None,
     testing_dataset_path: Optional[str] = None,
     model_wts: Optional[str] = None,
@@ -430,10 +431,14 @@ async def train_model(
     freeze_features: Optional[bool] = False  # Changed to None default
 ):
 
-    if model == 'car_yaw':
+    model_name = model_name.replace('_','-') # people tend to confused - with _
+
+    if ( model_name == 'car-yaw'):
         from features.car.yaw_model import train
     else:
-        return {"message": f"Unknown model `{model}` is unsupported" }
+        msg = f'Unsupported / Unknown {model_name}'
+        logging.error( msg )
+        return {"message": msg }
 
     background_tasks.add_task(
         train,
@@ -443,6 +448,8 @@ async def train_model(
         freeze_features_layers  = freeze_features,
         num_epochs              = num_epochs
     )
+
+    return {"message": f"Training of {model_name} started in the background"}
 
 if __name__ == "__main__":
     import uvicorn

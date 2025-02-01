@@ -1,0 +1,16 @@
+torch
+torchvision
+torchreid
+paddleocr
+ultralytics
+opencv-python-headless
+deep-sort-realtime
+sahi
+easyocr
+gdown
+openai-clip
+lapx>=0.5.2
+python-dotenv
+ffmpeg-python
+fiftyone
+tqdm

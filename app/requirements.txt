@@ -9,3 +9,4 @@ redis
 rq
 tqdm
 uvicorn
+modal-client

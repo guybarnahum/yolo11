@@ -21,7 +21,7 @@ def setLevel_locked(level):
         module  = inspect.getmodule(caller_frame)
         culprit = module.__name__
 
-        logging.warning(f"🚨 WARNING: Denied attempt of ({culprit}) to change the root logger level to {logging.getLevelName(level)}")
+        logging.warning(f"⚠️ Denied attempt of ({culprit}) to change the root logger level to {logging.getLevelName(level)}")
         return # do noting - logger is lock to changes
 
     _setLevel(level)
@@ -46,8 +46,9 @@ import fiftyone as fo
 
 import os
 from pathlib import Path
+import sys
 import time
-from tqdm import tqdm #select best for enviroment
+from tqdm.auto import tqdm #select best for enviroment
 from typing import Optional
 
 from compress_video import compress_video_to_size, compress_video_to_bitrate, get_bitrate, calculate_bit_rate
@@ -88,7 +89,7 @@ def process_video(  model_path, process_one_frame_func,
             dataset = fo.Dataset.from_dir( dataset_dir=dataset_path, dataset_type=dataset_type)
             logging.info(f"Loading finished...")
         except Exception as e:
-            logging.error(f"Exception: {str(e)}")
+            logging.error(f"🚨 Exception: {str(e)}")
             dataset = None
 
         if not dataset:
@@ -235,12 +236,12 @@ def run_compress_video(input_path, output_path, size_upper_bound = 0, bitrate = 
         elif bitrate:
             output_file_path = compress_video_to_bitrate(input_path, output_mp4_path, bitrate, 0)
         else:
-            logging.error("Error: run_compress_video - no size or bitrate provided")
+            logging.error("🚨 Error: run_compress_video - no size or bitrate provided")
 
         logging.info("Video compression completed - {output_file_path}.")
 
     except Exception as e:
-        logging.error(f"Error during video compression: {e}")
+        logging.error(f"🚨 Error during video compression: {e}")
         traceback.print_exc()
 
 
@@ -303,7 +304,7 @@ def run_process_video(  model_path, input_path, output_path, dataset_path=None,
 
         logging.info("Video processing completed.")
     except Exception as e:
-        logging.error(f"Error during video processing: {e}")
+        logging.error(f"🚨 Error during video processing: {e}")
         traceback.print_exc()
 
 
@@ -422,21 +423,26 @@ async def process_video_in_background(
 async def train_model(
     background_tasks: BackgroundTasks,
     model:str,
-    dataset_path: str,
-    model_wts: Optional[str] = None
+    dataset_path: Optional[str] = None,
+    testing_dataset_path: Optional[str] = None,
+    model_wts: Optional[str] = None,
+    num_epochs: Optional[int] = 10 ,
+    freeze_features: Optional[bool] = False  # Changed to None default
 ):
+
     if model == 'car_yaw':
         from features.car.yaw_model import train
     else:
-        return {"message": "Unknown model `{model}` is unsupported" }
+        return {"message": f"Unknown model `{model}` is unsupported" }
 
-    # Add the background task
     background_tasks.add_task(
         train,
-        dataset_path,
-        model_weights_path=model_wts
+        training_dataset_path    = dataset_path,
+        testing_dataset_path    = testing_dataset_path,
+        model_weights_path      = model_wts,
+        freeze_features_layers  = freeze_features,
+        num_epochs              = num_epochs
     )
-
 
 if __name__ == "__main__":
     import uvicorn

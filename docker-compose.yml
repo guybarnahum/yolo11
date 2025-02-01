@@ -13,8 +13,7 @@ services:
       - ./datasets:/app/datasets
       # Persistent cache directories below - download once
       - ./models/easyocr:/root/.EasyOCR/model 
-      - ./models/paddleocr:/root/.paddleocr/whl   
-      - ./models/mediapipe:/usr/local/lib/python3.11/site-packages/mediapipe/modules
+      - ./models/paddleocr:/root/.paddleocr/whl
       - ./models/torch:/root/.cache/torch
       # # Mount pip cache directory for faster image builds
       - pip-cache:/pip_cache      

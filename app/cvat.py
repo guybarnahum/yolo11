@@ -161,7 +161,7 @@ def cvat_add_frame_to_manifest( cvat_json, frame, frame_number, fps, force = Tru
         cvat_json['manifest_frames'].append(frame_info)
 
 
-def cvat_add_frame( cvat_json, detections, frame, frame_number, fps) :
+def cvat_add_frame( cvat_json, detections, frame_number) :
     """
     Convert frame annotations to CVAT JSON format and add to the annotations.
     
@@ -171,7 +171,6 @@ def cvat_add_frame( cvat_json, detections, frame, frame_number, fps) :
         cvat_json: The current CVAT JSON object that stores the annotations.
     """
 
-    cvat_add_frame_to_manifest(cvat_json, frame, frame_number, fps)
     track_index_in_frame = set()
 
     for ix, detection in enumerate(detections):
@@ -310,7 +309,7 @@ def cvat_save_json( data, base_dir, file_name ):
         with open(json_path, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2)
 
-        logging.info(f'Saved data into {json_path}')
+        logging.debug(f'Saved data into {json_path}')
 
     except Exception as e:
         logging.error(f'cvat_save_json : {str(e)}')
@@ -351,8 +350,11 @@ def cvat_save(cvat_json, base_dir):
 
     # Zip it
     shutil.copy(video_path,data_base_dir)
-    shutil.make_archive(base_dir, "zip", base_dir)
+    archive_path = shutil.make_archive(base_dir, "zip", base_dir)
     
     # remove data_base_dir (!)
-    shutil.rmtree(data_base_dir)
+    # shutil.rmtree(data_base_dir) 
+    shutil.rmtree(base_dir) # <-- disbale to inspect archive in IDE
+
+    return archive_path
 

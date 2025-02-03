@@ -58,7 +58,7 @@ from features.inspect import inspect
 
 from trackers.deepsort.tracker import setup as deepsort_setup
 from utils import annotate_frame, build_name, cuda_device, setup_model, print_detections
-from cvat import cvat_init, cvat_add_frame, cvat_save
+from cvat import cvat_init, cvat_add_frame, cvat_add_frame_to_manifest, cvat_save
 
 load_dotenv()
 app = FastAPI()
@@ -117,7 +117,6 @@ def process_video(  model_path, process_one_frame_func,
     w, h, fps = (int(cap.get(x)) for x in (cv2.CAP_PROP_FRAME_WIDTH, 
                                            cv2.CAP_PROP_FRAME_HEIGHT, 
                                            cv2.CAP_PROP_FPS))
-    frame_ms  = int(1000 / fps)
 
     out = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*"MJPG"), fps, (w, h))
 
@@ -140,8 +139,9 @@ def process_video(  model_path, process_one_frame_func,
     cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
 
     if cvat:
-        input_stem = Path(input_path).stem
-        cvat_json = cvat_init( name=input_stem,video_path=input_path,width=w, height=h, num_frames=total_frames)
+        cvat_name = Path(output_path).stem
+        cvat_json = cvat_init( name=cvat_name,video_path=input_path,width=w, height=h, num_frames=total_frames)
+        logging.info(f'cvat backup archive : {cvat_name}')
 
     for frame_ix in range(start_frame, end_frame):
         ret, im0 = cap.read()
@@ -166,13 +166,14 @@ def process_video(  model_path, process_one_frame_func,
         # print_detections( features, frame_number = frame_ix )
         detections.extend(features)
         
+        if cvat: # cvat_add_frame_to_manifest before annotating!
+            cvat_json = cvat_add_frame(cvat_json, detections, frame_ix)
+            cvat_add_frame_to_manifest(cvat_json, im0, frame_ix, fps, force = (total_frames < 120) )
+
         # annotae the frame after inspection job
         label = f" {model_label} FN#{frame_ix} "
         annotate_frame(im0, detections, label=label)
         out.write(im0)
-
-        if  cvat:
-            cvat_json = cvat_add_frame(cvat_json, detections, im0, frame_ix, fps)
 
         if dataset:
             detections_list = []
@@ -206,7 +207,8 @@ def process_video(  model_path, process_one_frame_func,
     if  cvat:
         # generate the cvat files inside output sub-direcotry
         output_base_dir = os.path.dirname(output_path)
-        cvat_save(cvat_json, output_base_dir)
+        cvat_archive_path = cvat_save(cvat_json, output_base_dir)
+        logging.info(f'cvat archive saved at {cvat_archive_path}')
 
     # Add the sample to the dataset and save
     if dataset:

@@ -165,8 +165,8 @@ def inspect(car_detection, frame, video_path):
     
     car_detection.detail = yaw_label
 
-    car_detection.attributes.append({"name":"yaw", "value":yaw})
-    car_detection.attributes.append({"name": "yaw_conf", "value":conf})
+    car_detection.attributes.append({"name":"yaw","value":yaw})
+    car_detection.attributes.append({"name":"yaw_conf","value":conf})
 
     logging.debug(f'features.car.inspect {yaw_label}')
 
@@ -174,19 +174,21 @@ def inspect(car_detection, frame, video_path):
     results = license_plate_model.predict( source=car_frame, verbose=False, device=device )
     lp_detections = []
 
+    best_ocr_score = 0.0
+    best_ocr_text  = ''
+
     if len(results[0].boxes):
 
         # Offset detection back to original frame from car frame
         lp_detections = flatten_results(results, frame_number=car_detection.frame_number, offset_x=x1, offset_y=y1)
     
-        
         for lp in lp_detections:
             
             lp.name     = "license_plate"
             lp.track_id = car_detection.track_id
 
             if ocr_reader:
-                
+
                 lp_text, lp_score = read_license_plate( lp, frame ) # lp bbox is in frame ccordinates
 
                 if lp_text and lp_score and lp_score > 0.5:
@@ -198,5 +200,13 @@ def inspect(car_detection, frame, video_path):
 
                     lp.attributes.append({"name": "ocr_text","value":lp_text})
                     lp.attributes.append({"name": "ocr_text_conf","value":lp_score})
+
+                    if best_ocr_score < lp_score:
+                       best_ocr_score = lp_score
+                       best_ocr_text  = lp_text
+
+    
+    car_detection.attributes.append({"name":"license_plate","value":best_ocr_text})
+    car_detection.attributes.append({"name":"license_plate_conf","value":best_ocr_score})
 
     return lp_detections

@@ -3,7 +3,6 @@ import logging
 from types import MethodType
 from utils import setup_model, cuda_device, flatten_results, print_detections, annotate_frame, annotate_frame_text
 from .pose import detect_pose_from_bbox, pose_car_yaw
-from cvat import spec_id
 
 license_plate_model,_ = setup_model('./models/license_plate_detector.pt')
 
@@ -163,19 +162,14 @@ def inspect(car_detection, frame, video_path):
 
     yaw, conf = pose_car_yaw(car_detection, car_frame)
     yaw_label = f'yaw:{yaw},{conf:.3f}'
-    logging.debug(f'features.car.inspect {yaw_label}')
+    
     car_detection.detail = yaw_label
 
-    car_detection.attributes.append({   "spec_id"   : spec_id("yaw"),
-                                        "name"      : "yaw",
-                                        "value"     : yaw
-                                    })
-    
-    car_detection.attributes.append({   "spec_id"   : spec_id("yaw_conf"),
-                                        "name"      : "yaw_conf",
-                                        "value"     : conf
-                                    })
-    
+    car_detection.attributes.append({"name":"yaw", "value":yaw})
+    car_detection.attributes.append({"name": "yaw_conf", "value":conf})
+
+    logging.debug(f'features.car.inspect {yaw_label}')
+
     # License Plate(s)
     results = license_plate_model.predict( source=car_frame, verbose=False, device=device )
     lp_detections = []
@@ -202,14 +196,7 @@ def inspect(car_detection, frame, video_path):
 
                     logging.debug( f'features.car.inspect detail : {lp.detail}' )
 
-                    lp.attributes.append({  "spec_id"   : spec_id("ocr_text"),
-                                            "name"      : "ocr_text",
-                                            "value"     : lp_text
-                                        })
-
-                    lp.attributes.append({  "spec_id"   : spec_id("ocr_text_conf"),
-                                            "name"      : "ocr_text_conf",
-                                            "value"     : lp_score
-                                        })
+                    lp.attributes.append({"name": "ocr_text","value":lp_text})
+                    lp.attributes.append({"name": "ocr_text_conf","value":lp_score})
 
     return lp_detections

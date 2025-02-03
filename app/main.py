@@ -117,6 +117,7 @@ def process_video(  model_path, process_one_frame_func,
     w, h, fps = (int(cap.get(x)) for x in (cv2.CAP_PROP_FRAME_WIDTH, 
                                            cv2.CAP_PROP_FRAME_HEIGHT, 
                                            cv2.CAP_PROP_FPS))
+    frame_ms  = int(1000 / fps)
 
     out = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*"MJPG"), fps, (w, h))
 
@@ -125,8 +126,9 @@ def process_video(  model_path, process_one_frame_func,
     logging.info(f"detect-model: {model_path}, tile: {tile}, conf: {conf} device: {device}")
 
     # Frame calculations
-    start_frame = int(start_ms * fps / 1000) if start_ms else 0   
-    end_frame = int(end_ms * fps / 1000) if end_ms else int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    start_frame  = int(start_ms * fps / 1000) if start_ms else 0   
+    end_frame    = int(end_ms * fps / 1000) if end_ms else (total_frames - 1)
 
     frames_to_process = end_frame - start_frame
     progress_bar = tqdm(total=frames_to_process)
@@ -138,8 +140,8 @@ def process_video(  model_path, process_one_frame_func,
     cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
 
     if cvat:
-        input_name = Path(input_path).stem
-        cvat_json = cvat_init(name=input_name,video_path=input_path)
+        input_stem = Path(input_path).stem
+        cvat_json = cvat_init( name=input_stem,video_path=input_path,width=w, height=h, num_frames=total_frames)
 
     for frame_ix in range(start_frame, end_frame):
         ret, im0 = cap.read()
@@ -161,18 +163,16 @@ def process_video(  model_path, process_one_frame_func,
                 if detection_features:
                     features.extend(detection_features)
                 
+        # print_detections( features, frame_number = frame_ix )
         detections.extend(features)
-
-        # print_detections( detections )
-
+        
         # annotae the frame after inspection job
         label = f" {model_label} FN#{frame_ix} "
         annotate_frame(im0, detections, label=label)
+        out.write(im0)
 
         if  cvat:
-            cvat_json = cvat_add_frame(frame_ix, detections, cvat_json)
-
-        out.write(im0)
+            cvat_json = cvat_add_frame(cvat_json, detections, im0, frame_ix, fps)
 
         if dataset:
             detections_list = []
@@ -204,8 +204,9 @@ def process_video(  model_path, process_one_frame_func,
         progress_bar.update(1)
     
     if  cvat:
-        cvat_json_path = Path(output_path).with_suffix('.json')
-        cvat_save(cvat_json, cvat_json_path)
+        # generate the cvat files inside output sub-direcotry
+        output_base_dir = os.path.dirname(output_path)
+        cvat_save(cvat_json, output_base_dir)
 
     # Add the sample to the dataset and save
     if dataset:
@@ -431,7 +432,7 @@ async def train_model(
     freeze_features: Optional[bool] = False  # Changed to None default
 ):
 
-    model_name = model_name.replace('_','-') # people tend to confused - with _
+    model_name = model_name.replace('_','-') # common typo tend to confused - with _
 
     if ( model_name == 'car-yaw'):
         from features.car.yaw_model import train

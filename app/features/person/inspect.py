@@ -93,7 +93,7 @@ def face_to_detection( face, offset_x = 0, offset_y = 0, frame_number = None ):
     detection.cls_id = 0
     detection.name = 'face'
     detection.area = area
-    detection.frame_number =  frame_number or -1
+    detection.frame_number = frame_number
     detection.inspect = False
     detection.attributes = []
     detection.mask = None

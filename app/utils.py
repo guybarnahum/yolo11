@@ -344,20 +344,27 @@ def flatten_results(results, min_conf = None, frame_number = None, should_inspec
     return detections
 
 
+def print_detection( d , index = None):
+
+    conf = float(d.conf)
+    bbox = [round(num, 2) for num in d.bbox]
+    detail = d.detail
+    fn     = d.frame_number
+    ix     = str(index) if index is not None else '-'
+
+    if d.track_id:
+        print(f"{ix}> track_id:{d.track_id},{d.name},[{bbox}],conf:{conf:.2f}, detail:{detail}, fn#:{fn}")
+    else:
+        print(f"{ix}> {d.name},[{bbox}],conf:{conf:.2f}, detail:{detail}, fn#:{fn}")
+
+
 def print_detections(detections, frame_number = None):
     
     if frame_number:
         print(f">>>>>>>>>>>>>>>>>>>>> Frame {frame_number} <<<<<<<<<<<<<<<<<<<<<")
 
     for ix, d in enumerate(detections):
-        conf = float(d.conf)
-        bbox = [round(num, 2) for num in d.bbox]
-        detail = d.detail
-
-        if d.track_id:
-            print(f"{ix}> track_id:{d.track_id},{d.name},[{bbox}],conf:{conf:.2f}, detail:{detail}")
-        else:
-            print(f"{ix}> {d.name},[{bbox}],conf:{conf:.2f}, detail:{detail}")
+        print_detection(d, index = ix )
 
 
 frames_to_debug = None # [1,2,3,4,5] 

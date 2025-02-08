@@ -161,21 +161,26 @@ def inspect(car_detection, frame, video_path):
     car_frame = frame[ int(y1): int(y2), int(x1): int(x2), :]
 
     yaw, conf = pose_car_yaw(car_detection, car_frame)
-    yaw_label = f'yaw:{yaw},{conf:.3f}'
     
-    car_detection.detail = yaw_label
+    if yaw:
+        conf = round(conf,3)
+        yaw_label = f'yaw:{yaw},{conf}'
+    
+        car_detection.detail = yaw_label
 
-    car_detection.attributes.append({"name":"yaw","value":yaw})
-    car_detection.attributes.append({"name":"yaw_conf","value":conf})
+        car_detection.attributes.append({"name":"yaw","value":yaw})
+        car_detection.attributes.append({"name":"yaw_conf","value":conf})
 
-    logging.debug(f'features.car.inspect {yaw_label}')
+        logging.debug(f'features.car.inspect {yaw_label}')
+    else:
+        logging.warning(f'Could not predict car yaw - (yaw:{yaw},conf:{conf})')
 
     # License Plate(s)
     results = license_plate_model.predict( source=car_frame, verbose=False, device=device )
     lp_detections = []
 
     best_ocr_score = 0.0
-    best_ocr_text  = ''
+    best_ocr_text  = None
 
     if len(results[0].boxes):
 
@@ -193,8 +198,8 @@ def inspect(car_detection, frame, video_path):
 
                 if lp_text and lp_score and lp_score > 0.5:
 
-                    lp_score  = round(lp_score,2)
-                    lp.detail = f"{lp_text}({lp_score:.2f})"
+                    lp_score  = round(lp_score,3)
+                    lp.detail = f"{lp_text}({lp_score})"
 
                     logging.debug( f'features.car.inspect detail : {lp.detail}' )
 
@@ -205,8 +210,8 @@ def inspect(car_detection, frame, video_path):
                        best_ocr_score = lp_score
                        best_ocr_text  = lp_text
 
-    
-    car_detection.attributes.append({"name":"license_plate","value":best_ocr_text})
-    car_detection.attributes.append({"name":"license_plate_conf","value":best_ocr_score})
+        if best_ocr_text: # Did we find anything?
+            car_detection.attributes.append({"name":"license_plate","value":best_ocr_text})
+            car_detection.attributes.append({"name":"license_plate_conf","value":best_ocr_score})
 
     return lp_detections

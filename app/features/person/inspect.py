@@ -87,9 +87,10 @@ def face_to_detection( face, offset_x = 0, offset_y = 0, frame_number = None ):
     area = ( face_x2 - face_x1 ) * ( face_y2 - face_y1 )
     if area < 0 : area = - area
 
+    bbox = [offset_x+face_x1, offset_y+face_y1, offset_x+face_x2, offset_y+face_y2]
     detection = SimpleNamespace()
-    detection.bbox = [offset_x+face_x1, offset_y+face_y1, offset_x+face_x2, offset_y+face_y2]
-    detection.conf = conf
+    detection.bbox = [round(coord,2) for coord in bbox]
+    detection.conf = round(conf,3)
     detection.cls_id = 0
     detection.name = 'face'
     detection.area = area

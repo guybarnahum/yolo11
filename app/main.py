@@ -45,10 +45,11 @@ import importlib
 from fastapi import BackgroundTasks, FastAPI, Query
 import fiftyone as fo
 
+from pprint import pformat
 import os
-from pathlib import Path
 import sys
 import time
+
 from tqdm.auto import tqdm #select best for enviroment
 from typing import Optional
 
@@ -57,8 +58,13 @@ from yolo11 import process_one_frame
 from features.inspect import inspect
 
 from trackers.deepsort.tracker import setup as deepsort_setup
-from utils import annotate_frame, build_name, cuda_device, setup_model, print_detections
+from utils import build_name, cuda_device, setup_model
+from utils import annotate_frame, color_map_init, color_map_update
+from utils import print_detections, print_detection
+
 from cvat import cvat_init, cvat_add_frame, cvat_add_frame_to_manifest, cvat_save
+from evaluation.groundtruth import gt_load_mot
+from evaluation.detections import evaluate_init, evaluate_frame, evaluate_aggregate_metrics, evaluate_terminate
 
 load_dotenv()
 app = FastAPI()
@@ -138,10 +144,27 @@ def process_video(  model_path, process_one_frame_func,
 
     cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
 
+    # We use output path to locate cvat target and mot groundtruth files
+    output_base_dir = os.path.basename(output_path)
+    output_stem = os.path.splitext(output_base_dir)[0] # remove ext
+
     if cvat:
-        cvat_name = Path(output_path).stem
-        cvat_json = cvat_init( name=cvat_name,video_path=input_path,width=w, height=h, num_frames=total_frames)
-        logging.info(f'cvat backup archive : {cvat_name}')
+        cvat_json = cvat_init( name=output_stem,video_path=input_path,width=w, height=h, num_frames=total_frames)
+        logging.info(f'cvat backup archive : {output_stem}')
+
+    # Look for a color map for the file
+    input_stem, _ = os.path.splitext(input_path)  # remove ext
+    cm_path = input_stem +'_cm.json'  
+    gt_path = input_stem +'_gt.mot'   
+
+    # Try to load groudtruth mot file to evaluate against
+    ev = None
+    gt = gt_load_mot(gt_path)
+    if gt:
+        ev = evaluate_init(gt)
+
+    # Try to locd color map to color with
+    cm = color_map_init(cm_path)
 
     for frame_ix in range(start_frame, end_frame):
         ret, im0 = cap.read()
@@ -171,9 +194,15 @@ def process_video(  model_path, process_one_frame_func,
             cvat_add_frame_to_manifest(cvat_json, im0, frame_ix, fps, force = (total_frames < 120) )
 
         # annotae the frame after inspection job
+        color_map_update(cm, frame_ix)
+
         label = f" {model_label} FN#{frame_ix} "
-        annotate_frame(im0, detections, label=label)
+        annotate_frame(im0, detections, label=label, colors_map=cm)
         out.write(im0)
+
+        # evaluate frame? may be slow
+        if ev:
+            evaluate_frame( ev, detections, frame_ix )
 
         if dataset:
             detections_list = []
@@ -210,6 +239,14 @@ def process_video(  model_path, process_one_frame_func,
         cvat_archive_path = cvat_save(cvat_json, output_base_dir)
         logging.info(f'cvat archive saved at {cvat_archive_path}')
 
+    if ev:
+        
+        metrics = evaluate_aggregate_metrics(ev)
+        logging.info(f'metrics:\n{pformat(metrics)}')
+
+        evaluate_terminate(ev)
+        ev = None
+
     # Add the sample to the dataset and save
     if dataset:
         logging.info("Adding sample to dataset")
@@ -227,9 +264,9 @@ def process_video(  model_path, process_one_frame_func,
 
     
 def run_compress_video(input_path, output_path, size_upper_bound = 0, bitrate = 0):
-    """
+    '''
     Background task to run the compress_video function.
-    """
+    '''
     try:
         # Run the video processing function
         path, extension = os.path.splitext(output_path)
@@ -439,7 +476,7 @@ async def train_model(
     if ( model_name == 'car-yaw'):
         from features.car.yaw_model import train
     else:
-        msg = f'Unsupported / Unknown {model_name}'
+        msg = f'🚨 Unsupported / Unknown {model_name}'
         logging.error( msg )
         return {"message": msg }
 

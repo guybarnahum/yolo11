@@ -1,16 +1,21 @@
+# Misc
+cython
+gdown
+
 # PyTorch
 torch
 torchvision
 torchreid
 
-# PaddlePaddle, TensorBoard (Ensure Python 3.11 support) is installed beforehand 
+# OCR
+# PaddlePaddle, TensorBoard (Ensure Python 3.11 support) are installed beforehand 
 paddleocr
-
-# Additional libraries
-cython
 easyocr
+
+# Tracker, Tiler, etc
 deep-sort-realtime
-gdown
 openai-clip
 sahi
-# transformers
+
+# Evaluation
+python-Levenshtein

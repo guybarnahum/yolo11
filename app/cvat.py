@@ -31,9 +31,11 @@ def cvat_init(name, video_path, width, height,num_frames):
         
         "manifest_frames": [],
         
+        "label_names" : [ "person", "car", "face", "bicycle", "license_plate" ],
+
         "task": {
                 "version": "1.0",
-                "name"  : f"{name}_task",
+                "name"  : f"{name}_cvat",
                 "description": "This task involves annotating objects in a {video_name}," 
                                "make sure to upload and assicate the video with the task",
                 "mode"  : "interpolation",
@@ -80,25 +82,29 @@ def cvat_init(name, video_path, width, height,num_frames):
                                 "name": "yaw",
                                 "input_type": "number",
                                 "mutable": True,
-                                "values": []
+                                "values": [],
+                                "default_value" : "-1"
                             },
                             {
                                 "name": "yaw_conf",
                                 "input_type": "number",
                                 "mutable": True,
-                                "values": []
+                                "values": [],
+                                "default_value" : "0.0"
                             },
                             {
                                 "name": "license_plate",
                                 "input_type": "text",
                                 "mutable": True,
-                                "values": []
+                                "values": [],
+                                "default_value" : ""
                             },
                             {
                                 "name": "license_plate_conf",
                                 "input_type": "number",
                                 "mutable": True,
-                                "values": []
+                                "values": [],
+                                "default_value" : "0.0"
                             }
                         ],
                         "color": "#3380ff",  # Bright Blue
@@ -112,13 +118,15 @@ def cvat_init(name, video_path, width, height,num_frames):
                                 "name": "ocr_text",
                                 "input_type": "text",
                                 "mutable": True,
-                                "values": []
+                                "values": [],
+                                "default_value" : ""
                             },
                             {
                                 "name": "ocr_text_conf",
                                 "input_type": "number",
                                 "mutable": True,
-                                "values": []
+                                "values": [],
+                                "default_value" : "0.0"
                             }  
                         ],
                         "color": "#a833ff", # Purple
@@ -176,6 +184,12 @@ def cvat_add_frame( cvat_json, detections, frame_number) :
     for ix, detection in enumerate(detections):
         
         label       = detection.name
+
+        # CVAT is strict in terms of which labels are included ..
+        if label not in cvat_json[ "label_names" ]:
+            logging.warning(f'CVAT unsupported label {label} - skipped ...')
+            continue
+
         bbox        = detection.bbox  # [xmin, ymin, xmax, ymax]
         track_id    = detection.track_id
         points      = [bbox[0], bbox[1], bbox[2], bbox[3]]
@@ -211,7 +225,7 @@ def cvat_add_frame( cvat_json, detections, frame_number) :
                                                                 "frame": frame_number, # first frame?
                                                                 "group": 0,
                                                                 "source": "auto",
-                                                                "attributes":[], # Non mutable attaributes go here
+                                                                "attributes": [], # <-- Non mutable attaributes go here
                                                                 "elements": [], 
                                                                 "shapes": [shape]
                                                         })

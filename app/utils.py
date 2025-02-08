@@ -1,4 +1,5 @@
 import logging
+import json
 import cv2
 import os
 
@@ -293,11 +294,19 @@ def flatten_results(results, min_conf = None, frame_number = None, should_inspec
 
         for jdx, box in enumerate(cls_results.boxes):
             
-            conf   = cls_results.boxes.conf[jdx].cpu().item()  # Confidence score
+            conf = round(cls_results.boxes.conf[jdx].cpu().item(),3)  # Confidence score
 
             # skip detections with low conf
             if min_conf and min_conf > conf:
                 continue
+
+            cls_id = int(cls_results.boxes.cls[jdx].cpu().item())  # Class ID
+            cls_id = map_cls_id(cls_id) if map_cls_id else cls_id
+
+            try:
+                name = cls_results.names[ cls_id ] if cls_id < len(cls_results.names) else "Unknown"
+            except Exception as e:
+                name = "Unknown"
 
             x1, y1, x2, y2 = cls_results.boxes.xyxy[jdx].cpu().tolist()
             
@@ -309,18 +318,10 @@ def flatten_results(results, min_conf = None, frame_number = None, should_inspec
                 y1 = y1 + offset_y
                 y2 = y2 + offset_y
 
-            bbox   = [x1, y1, x2, y2]
+            bbox   = [round(coord,2) for coord in [x1, y1, x2, y2]]
             
             area   = (x2 - x1) * (y2 - y1)
             if area < 0 : area = -area
-
-            cls_id = int(cls_results.boxes.cls[jdx].cpu().item())  # Class ID
-            cls_id = map_cls_id(cls_id) if map_cls_id else cls_id
-
-            try:
-                name = cls_results.names[ cls_id ] if cls_id < len(cls_results.names) else "Unknown"
-            except Exception as e:
-                name = "Unknown"
 
             mask        = masks[jdx]     if masks else None
             track_id    = int(track_ids[jdx]) if track_ids else None
@@ -331,7 +332,7 @@ def flatten_results(results, min_conf = None, frame_number = None, should_inspec
             detection.cls_id = cls_id
             detection.name = name
             detection.area = area
-            detection.frame_number = frame_number or -1
+            detection.frame_number = frame_number
             detection.inspect = should_inspect(detection) if should_inspect else False
             detection.attributes = []
             detection.mask = mask
@@ -358,13 +359,19 @@ def print_detection( d , index = None):
         print(f"{ix}> {d.name},[{bbox}],conf:{conf:.2f}, detail:{detail}, fn#:{fn}")
 
 
-def print_detections(detections, frame_number = None):
+def print_detections(detections, frame_number = None, pre=None, post=None,labels=None):
     
-    if frame_number:
-        print(f">>>>>>>>>>>>>>>>>>>>> Frame {frame_number} <<<<<<<<<<<<<<<<<<<<<")
+    if pre          : print(pre)
+    if frame_number : print(f">>>>>>>>>>>>>>>>>>>>> Frame {frame_number} <<<<<<<<<<<<<<<<<<<<<")
 
     for ix, d in enumerate(detections):
+        
+        if labels and d.name not in labels:
+            # print(f'skipping {d.name} not in {labels}')
+            continue # filter detections
         print_detection(d, index = ix )
+
+    if post : print(post)
 
 
 frames_to_debug = None # [1,2,3,4,5] 
@@ -434,8 +441,84 @@ def annotate_frame_pose_keypoints( frame, persons, kpt_color = None, edge_color 
 
     return frame
 
+def hex_to_bgr(hex_color):
+    '''
+    Convert hex color #RRGGBB to OpenCV BGR tuple.
+    '''
+    hex_color = hex_color.lstrip('#')  # Remove '#' if present
+    r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))  # Convert hex to RGB
+    return (b, g, r)  # Convert to BGR
 
-def annotate_frame(frame, detections, label = None):
+def color_map_init(cm_path):
+
+    '''
+    cm_path holds something like this:
+
+    {
+        "__comment__" : "Number keys are not valid-json, track_ids and frame numbers are strings..",
+        "colors": {               
+            "default": "#7F7F7F",
+            "white": "#FFFFFF",
+            "gray": "#7F7F7F",
+            "warm_yellow": "#FFCC00",
+            "orange_red": "#FF4500"
+        },
+        "tracks": {},
+        "frames": {
+                "3":  { "4": "orange_red" },
+                "10": { "2": "warm_yellow" },
+                "23": { "2": "default" },
+                "36": { "4": "warm_yellow" },
+                "40": { "4": "default" }
+            }
+    }
+
+    '''
+
+    color_map = None
+
+    try:
+        with open(cm_path, "r") as f:
+            color_map = json.load(f)
+    except FileNotFoundError as e:
+        logging.info(f'No color map provided ({cm_path})- using defaults')
+    except Exception as e:
+        logging.error(f'color_map_init  - {str(e)}')
+        color_map = None
+
+    if color_map:
+        # Convert hex colors to cv2 topples - not supported in json..
+        for color_name, hex_color in color_map['colors'].items():
+            color = hex_to_bgr(hex_color)
+            color_map['colors'][color_name] = color
+
+        # todo: convert frame dict from string key version to int key version
+        # This would save conversion of track_id and frame numbers to strings
+
+        logging.info(f'color_map {cm_path} loaded')
+
+    return color_map
+
+
+def color_map_update(color_map, frame_number):
+    
+    if color_map:
+        frame = str(frame_number) # json does not support numeric keys..
+        if frame in color_map['frames']:
+            frame_track_id_colors = color_map['frames'][frame]
+            for track_id, color_name in frame_track_id_colors.items():
+                if color_name in  color_map['colors']:
+                    color = color_map['colors'][color_name]
+                else:
+                    color = color_map['colors']['default']
+                    logging.error(f'Could not find {color_name} in map! Using default color {color}')
+
+                color_map['tracks'][track_id] = color
+        
+    return color_map
+
+
+def annotate_frame(frame, detections, label = None, colors_map = None):
     
     # initialize annotator for plotting masks
     annotator = frameAnnotator(frame, line_width=2)
@@ -457,7 +540,14 @@ def annotate_frame(frame, detections, label = None):
         if track_id : detection_label = detection_label + str(track_id)
 
         # Generate a color based on the track_id
-        color = colors(track_id, True)
+        if colors_map :
+            track_id_str = str(track_id) # json does not support numeric keys..
+            if track_id_str in colors_map['tracks']:
+                color = colors_map['tracks'][track_id_str]
+            else: 
+                color = colors_map['colors']['default']
+        else:
+            color = colors(track_id, True)
     
         if detection.mask is not None: # has mask? draw mask
             annotator.seg_bbox(mask=detection.mask, mask_color=color, label=detection_label, txt_color=annotator.get_txt_color(color))

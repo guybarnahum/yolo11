@@ -357,6 +357,7 @@ class DetectionQualityEvaluator:
 
         return frame_metrics
 
+
     def get_frame_metrics(self, frame_number):
         frame_metrics = None
 
@@ -367,10 +368,12 @@ class DetectionQualityEvaluator:
         
         return frame_metrics
 
+
 def evaluate_init(gt):
     ev = DetectionQualityEvaluator()
     ev.gt = gt
     return ev
+
 
 def evaluate_frame( ev, detections, frame_number ):
 
@@ -384,10 +387,11 @@ def evaluate_aggregate_metrics(ev, frames=None):
     
     # Make pretty prints possible in np
     np.set_printoptions(precision=3, suppress=True, formatter={'all': lambda x: f'{x:.3f}'})
-    if not frames:
-        frames = ev.frames.keys() # all frames we have
 
-    
+    if not frames:
+        frames = ev.frames.keys() # default is all the frames we have
+
+    # keys to literate over in dict
     model_names   = ['yolo', 'yunet', 'license_plate']
     metric_fields = [ 'average_precision', 'detection_rate', 'mean_iou' ]
     tracking_metrics_fields = [ 'false_negatives','false_positives','fragmentations','groundtruth_len','id_switches']
@@ -457,39 +461,9 @@ def evaluate_aggregate_metrics(ev, frames=None):
         mota = ev._calculate_mota(false_negatives, false_positives, id_switches, groundtruth_len)
         frame_set_metrics[model]['tracking']['mota'] = round(mota,3)
 
+    # all done aggregating
     return frame_set_metrics
+
 
 def evaluate_terminate(ev):
     del ev
-
-
-'''
-       import numpy as np
-
-    def aggregate_metrics(frame_metrics, total_ground_truths, misses, false_positives):
-
-        avg_precision = np.mean([frame['average_precision'] for frame in frame_metrics])
-        detection_rate = np.mean([frame['detection_rate'] for frame in frame_metrics])
-        mean_iou = np.mean([frame['mean_iou'] for frame in frame_metrics])
-
-        all_precisions = np.concatenate([frame['precision'] for frame in frame_metrics])
-        all_recalls = np.concatenate([frame['recall'] for frame in frame_metrics])
-
-        total_fragmentations = sum(frame['tracking']['fragmentations'] for frame in frame_metrics)
-        total_id_switches = sum(frame['tracking']['id_switches'] for frame in frame_metrics)
-        
-        mota = 1 - (misses + false_positives + total_id_switches + total_fragmentations) / max(1, total_ground_truths)
-
-        return {
-            'average_precision': avg_precision,
-            'detection_rate': detection_rate,
-            'mean_iou': mean_iou,
-            'precision': all_precisions,
-            'recall': all_recalls,
-            'tracking': {
-                'fragmentations': total_fragmentations,
-                'id_switches': total_id_switches,
-                'mota': mota
-            }
-        }
-'''

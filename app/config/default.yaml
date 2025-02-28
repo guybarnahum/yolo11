@@ -1,0 +1,21 @@
+video:
+  output_path: "./output"
+  input_path: null
+  dataset_path: null
+  start_ms: null
+  end_ms: null
+  cvat: false
+  perf: true
+
+image:
+  output_path: "./output"
+
+detect:
+  model_path: "./models/yolo11l"
+  tile: null
+  conf: 0.3
+
+track:
+  tracker: 'deepsort'
+  embedder: null
+  embedder_wts: null

@@ -39,13 +39,17 @@ logging.basicConfig(level=root_logging_level, format='%(asctime)s - %(name)s - %
 '''
 
 import cv2
+import cProfile
+
 from dotenv import load_dotenv
 import importlib
 
 from fastapi import BackgroundTasks, FastAPI, Query
 import fiftyone as fo
 
-from pprint import pformat
+from pprint import pformat, pprint
+from config import cfg_update, cfg_get_base_config, cfg_update_from_yaml
+
 import os
 import sys
 import time
@@ -58,9 +62,9 @@ from yolo11 import process_one_frame
 from features.inspect import inspect
 
 from trackers.deepsort.tracker import setup as deepsort_setup
-from utils import build_name, cuda_device, setup_model
+from utils import build_name, setup_model
 from utils import annotate_frame, color_map_init, color_map_update
-from utils import print_detections, print_detection
+from utils import print_detections, print_detection, print_profiler_stats
 
 from cvat import cvat_init, cvat_add_frame, cvat_add_frame_to_manifest, cvat_save
 from evaluation.groundtruth import gt_load_mot
@@ -69,17 +73,67 @@ from evaluation.detections import evaluate_init, evaluate_frame, evaluate_aggreg
 load_dotenv()
 app = FastAPI()
 
-def process_video(  model_path, process_one_frame_func, 
-                    input_path, output_path, dataset_path=None,
-                    tracker=None, embedder = None, embedder_wts = None,
-                    tile=None, 
-                    start_ms=None, end_ms=None, conf=None,
-                    cvat=False
-                ):
-    """
+
+def process_one_image( model_path, input_path, output_path, conf=None):
+
+    model_label = build_name( [ 'model', model_path ] )
+    input_base, input_ext = os.path.splitext(input_path)
+    logging.info(f"input_base : {input_base}, input_ext: {input_ext}")
+    
+    if os.path.isdir(output_path):
+        output_name = build_name([input_base, model_path] )
+        output_path = os.path.normpath(output_path) + '/' + output_name + input_ext
+        print(f'output_path : {output_path}')
+
+    # Read the image using OpenCV
+    image = cv2.imread(input_path)
+    if image is None:
+        raise FileNotFoundError(f"Image at {input_path} not found.")
+    
+    # Convert image from BGR (OpenCV default) to RGB (expected by YOLO model)
+    im0_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    
+    # Load models from the config
+    detect_model, _ = setup_model(model_path)
+    logging.info(f"detect-model: {model_path}, conf: {conf}")
+
+    im0_rgb, detections = process_one_frame(  im0_rgb, detect_model)
+ 
+    label = f" {model_label} "
+    annotate_frame(im0_rgb, detections, label=label)
+    # Convert the annotated image back to BGR for saving with OpenCV
+    im0_bgr = cv2.cvtColor(im0_rgb, cv2.COLOR_RGB2BGR)
+    
+    # Save the annotated image
+    cv2.imwrite(output_path, im0_bgr)
+    logging.info(f"Annotated image saved to {output_path}")
+
+    return detections
+    
+
+def process_video( cfg, input_path, output_path ):
+    '''
     Main video processing process
-    """
-    device = cuda_device()
+    '''
+    #input_path and output_path are not taken from cfg(!)
+    
+    dataset_path= cfg['video']['dataset_path']
+    start_ms    = cfg['video']['start_ms'   ]
+    end_ms      = cfg['video']['end_ms'     ]
+    cvat        = cfg['video']['cvat'       ]
+    perf        = cfg['video']['perf'       ]
+
+    model_path  = cfg['detect']['model_path']
+    tile        = cfg['detect']['tile'      ]
+    conf        = cfg['detect']['conf'      ]
+
+    tracker     = cfg['track']['tracker'     ]
+    embedder    = cfg['track']['embedder'    ]
+    embedder_wts= cfg['track']['embedder_wts']
+
+    profiler = cProfile.Profile() if perf else None
+    if profiler:
+        profiler.enable()
 
     if tracker == 'deepsort':
         deepsort_setup(embedder=embedder, embedder_wts=embedder_wts)
@@ -127,8 +181,8 @@ def process_video(  model_path, process_one_frame_func,
     out = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*"MJPG"), fps, (w, h))
 
     # Load models from the config
-    detect_model, tile_model = setup_model(model_path, tile, image_size=w, build_cls_map=True)
-    logging.info(f"detect-model: {model_path}, tile: {tile}, conf: {conf} device: {device}")
+    detect_model, tile_model = setup_model(model_path, tile=tile, image_size=w, build_cls_map=True)
+    logging.info(f"detect-model: {model_path}, tile: {tile}, conf: {conf}")
 
     # Frame calculations
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -171,11 +225,13 @@ def process_video(  model_path, process_one_frame_func,
         if not ret:
             break
 
-        im0, detections = process_one_frame_func(   im0, 
-                                                    detect_model, tile_model, tracker, 
-                                                    tile, conf, 
-                                                    frame_number=frame_ix, 
-                                                    device=device)
+        im0, detections = process_one_frame(   im0, 
+                                                detect_model, 
+                                                tile_model, 
+                                                tracker, 
+                                                tile, 
+                                                conf, 
+                                                frame_number=frame_ix)
         
         # Enqueue detections that need further inspection
         features = []
@@ -240,7 +296,6 @@ def process_video(  model_path, process_one_frame_func,
         logging.info(f'cvat archive saved at {cvat_archive_path}')
 
     if ev:
-        
         metrics = evaluate_aggregate_metrics(ev)
         logging.info(f'metrics:\n{pformat(metrics)}')
 
@@ -262,11 +317,20 @@ def process_video(  model_path, process_one_frame_func,
     out.release()
     cap.release()
 
+    if profiler:
+        profiler.disable()
+        print_profiler_stats(profiler)
+
     
-def run_compress_video(input_path, output_path, size_upper_bound = 0, bitrate = 0):
+    
+def run_compress_video(input_path, output_path, size_upper_bound = 0, bitrate = 0, profile=False):
     '''
     Background task to run the compress_video function.
     '''
+    profiler = cProfile.Profile() if profile else None
+    if profiler:
+        profiler.enable()
+
     try:
         # Run the video processing function
         path, extension = os.path.splitext(output_path)
@@ -284,24 +348,36 @@ def run_compress_video(input_path, output_path, size_upper_bound = 0, bitrate = 
     except Exception as e:
         logging.error(f"🚨 Error during video compression: {e}")
         traceback.print_exc()
+    
+    if profiler:
+        profiler.disable()
+        print_profiler_stats(profiler)
 
 
-def run_process_video(  model_path, input_path, output_path, dataset_path=None, 
-                        tracker=None, embedder=None, embedder_wts=None,
-                        tile=None, 
-                        start_ms=None, end_ms=None, 
-                        conf=None,
-                        cvat=False
-                    ):
+def run_process_video( cfg ):
     """
     Background task to run the process_video function.
     """
-    if not tracker: tracker="botsort.yaml"
+    input_path  = cfg['video']['input_path' ]
+    output_path = cfg['video']['output_path']
+    start_ms    = cfg['video']['start_ms'   ]
+    end_ms      = cfg['video']['end_ms'     ]
+    
+    model_path  = cfg['detect']['model_path']
+    tile        = cfg['detect']['tile'      ]
+
+    tracker     = cfg['track']['tracker'     ]
+    embedder    = cfg['track']['embedder'    ]
+    embedder_wts= cfg['track']['embedder_wts']
 
     try:
         if os.path.isdir(output_path):
             start = round( start_ms / 1_000, 2) if start_ms else None
+            if start: start = 's'+str(start)
+
             end   = round( end_ms   / 1_000, 2) if end_ms   else None
+            if end: end = 'e'+str(end)
+            
             embedder_name = embedder.replace('/','-') if embedder else None
 
             output_name = build_name([input_path, model_path, tracker, tile, embedder_name, start, end] )
@@ -317,13 +393,7 @@ def run_process_video(  model_path, input_path, output_path, dataset_path=None,
         logging.info(f"embedder {embedder} embedder_wts {embedder_wts}")
 
         # Run the video processing function
-        process_video(  model_path, process_one_frame, 
-                        input_path, output_path, dataset_path,
-                        tracker, embedder, embedder_wts,
-                        tile, 
-                        start_ms, end_ms,
-                        conf,
-                        cvat)
+        process_video( cfg, input_path, output_path )
 
         if target == ".mp4": 
             video_bitrate, audio_bitrate = get_bitrate(input_path)
@@ -336,7 +406,11 @@ def run_process_video(  model_path, input_path, output_path, dataset_path=None,
             path, extension = os.path.splitext(output_path)
             extension = '.mp4'
             output_mp4_path = path + extension
-            output_mp4_path = compress_video_to_bitrate(output_path, output_mp4_path, video_bitrate, audio_bitrate)
+
+            output_mp4_path = compress_video_to_bitrate(output_path, 
+                                                        output_mp4_path, 
+                                                        video_bitrate, 
+                                                        audio_bitrate)
 
             if (output_mp4_path):
                 logging.info(f"removing {output_path}")
@@ -347,7 +421,7 @@ def run_process_video(  model_path, input_path, output_path, dataset_path=None,
     except Exception as e:
         logging.error(f"🚨 Error during video processing: {e}")
         traceback.print_exc()
-
+        
 
 usage = '''Usage : http://localhost:8080/process?config_name=yolo11_sliced&input_path=./input/videoplayback.mp4&output_path=./output&start_ms=180000&end_ms=182000
         Supported configurations : yolo11_sliced | yolo11
@@ -401,15 +475,44 @@ async def compress_video(
         bitrate
     )
 
-    return {"message": "Video processing started in the background"}
+    return {"message": "Video compression started in the background"}
 
 
-@app.get("/process")
-async def process_video_in_background(
-    background_tasks: BackgroundTasks,
+@app.get("/process_image")
+async def process_image_endpoint(
     model_path: str,
     input_path: str,
     output_path: str,
+    conf: Optional[float] = None,   # minimum conf for detection 
+    perf: Optional[bool] = False
+    ):
+
+    profiler = cProfile.Profile() if profile else None
+    if profiler:
+        profiler.enable()
+
+    detections = []
+    error = None
+
+    try:
+        detections = process_one_image( model_path, input_path, output_path, conf=conf)
+    except Exception as e:
+        error = str(e)
+
+    if profiler:
+        profiler.disable()
+        print_profiler_stats(profiler)
+
+    return {"detections": detections, "error": error}
+
+
+@app.get("/process")
+async def process_video_in_background_endpoint(
+    background_tasks: BackgroundTasks,
+    input_path: str,
+    output_path: Optional[str] = None,
+    model_path: Optional[str] = None,
+    config_path: Optional[str] = None,
     dataset_path: Optional[str] = None,
     tracker: Optional[str] = None,
     embedder: Optional[str] = None,
@@ -419,43 +522,66 @@ async def process_video_in_background(
     end_ms: Optional[int] = None,
     start: Optional[int] = 0,
     end: Optional[int] = None,
-    conf: Optional[float] = None,   # minimum conf for detection 
-    cvat: Optional[bool] = Query(None)  # Changed to None default
+    conf: Optional[float] = None,  # minimum conf for detection 
+    cvat: Optional[bool] = False,  
+    perf: Optional[bool] = False
     ):
+
     '''
     Endpoint to start video processing as a background task using a GET request.
     '''
-    use_cvat = cvat is not None
-
     # Validate the input path
     if not os.path.exists(input_path):
         return {"error": f"Input file not found: {input_path}"}
-    
-    # Ensure the output directory exists
-    output_dir = os.path.dirname(output_path)
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir, exist_ok=True)
+   
+    if config_path and not os.path.exists(config_path):
+        return {"error": f"config file not found: {config_path}"}
 
     # overwrite ms is sec is provided
     start_ms = start * 1_000 if start != 0         else start_ms
     end_ms   = end   * 1_000 if end   is not None  else end_ms
 
+    base_cfg = cfg_get_base_config()
+
+    if config_path:
+        base_cfg = cfg_update_from_yaml(base_cfg, config_path , copy_cfg = False )
+
+    cfg_params = {
+        'video' : {
+            'input_path' : input_path,
+        },
+        'detect' :{},
+        'track'  :{}
+    }
+
+    
+    if output_path  : cfg_params['video']['output_path' ] = output_path
+    if dataset_path : cfg_params['video']['dataset_path'] = dataset_path
+    if start_ms     : cfg_params['video']['start_ms'    ] = start_ms
+    if end_ms       : cfg_params['video']['end_ms'      ] = end_ms
+    if cvat         : cfg_params['video']['cvat'        ] = cvat
+    if perf         : cfg_params['video']['perf'        ] = perf
+
+    if model_path   : cfg_params['detect']['model_path' ] = model_path
+    if tile         : cfg_params['detect']['tile'       ] = tile
+
+    if tracker      : cfg_params['track']['tracker'     ] = tracker
+    if embedder     : cfg_params['track']['embedder'    ] = embedder
+    if embedder_wts : cfg_params['track']['embedder_wts'] = embedder_wts
+
+    cfg_params = cfg_update(base_cfg,cfg_params, copy_cfg = False )
+
+    pprint(cfg_params)
+
+    # Ensure the output directory exists
+    output_path = cfg_params['video']['output_path' ]
+
+    output_dir = os.path.dirname(output_path)
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir, exist_ok=True)
+
     # Add the background task
-    background_tasks.add_task(
-        run_process_video,
-        model_path,
-        input_path,
-        output_path,
-        dataset_path,
-        tracker,
-        embedder,
-        embedder_wts,
-        tile,
-        start_ms,
-        end_ms,
-        conf,
-        use_cvat
-    )
+    background_tasks.add_task( run_process_video, cfg_params)
 
     return {"message": "Video processing started in the background"}
 
@@ -490,6 +616,7 @@ async def train_model(
     )
 
     return {"message": f"Training of {model_name} started in the background"}
+
 
 if __name__ == "__main__":
     import uvicorn

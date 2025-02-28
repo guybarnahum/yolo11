@@ -1,0 +1,3 @@
+track:
+  tracker: 'deepsort'
+  embedder: 'torchreid'

@@ -12,7 +12,6 @@ class DetectionQualityEvaluator:
     def __init__(self, gt = None):
         self.frames = defaultdict(dict)
         self.gt = gt
-        self.do_once = True
 
     def calculate_iou(self, box1, box2):
         """Calculate Intersection over Union between two bounding boxes"""
@@ -368,6 +367,15 @@ class DetectionQualityEvaluator:
         
         return frame_metrics
 
+
+'''
+    Evaluate interface : 
+        
+        init with groudtruth object
+        evaluate_frame
+        evaluate_aggregate_metrics
+        terminate
+'''
 
 def evaluate_init(gt):
     ev = DetectionQualityEvaluator()

@@ -544,7 +544,6 @@ def annotate_frame(frame, detections, label = None, colors_map = None):
             track_id_str = str(track_id) # json does not support numeric keys..
             if track_id_str in colors_map['tracks']:
                 color = colors_map['tracks'][track_id_str]
-            else: 
                 color = colors_map['colors']['default']
         else:
             color = colors(track_id, True)

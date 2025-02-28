@@ -3,6 +3,9 @@ import json
 import cv2
 import os
 
+import cProfile
+import pstats 
+
 import numpy as np
 
 from ultralytics import YOLO
@@ -23,6 +26,15 @@ def print_loggers(show_noset=False):
 
     root_level = logging.getLogger().level
     print(f"Logger Root, Level: {logging.getLevelName(root_level)}")
+
+
+def print_profiler_stats( profiler, num = 10 ):
+    try:
+        stats = pstats.Stats(profiler)
+        stats.strip_dirs().sort_stats('cumulative').print_stats(num)
+    
+    except Exception as e:
+        logging.error(f'print_profiler_stats - error : {str(e)}')
 
 
 cuda_device_type = None
@@ -253,7 +265,7 @@ def map_cls_id( self, cls_id ):
     return cls_id
 
 
-def setup_model(model_path, tile=None, image_size=108, build_cls_map=False):
+def setup_model(model_path, tile=None, image_size=1080, build_cls_map=True):
 
     # Wrap the YOLO model with SAHI's detection model
     device = cuda_device()
@@ -320,7 +332,7 @@ def flatten_results(results, min_conf = None, frame_number = None, should_inspec
 
             bbox   = [round(coord,2) for coord in [x1, y1, x2, y2]]
             
-            area   = (x2 - x1) * (y2 - y1)
+            area   = round((x2 - x1) * (y2 - y1),2)
             if area < 0 : area = -area
 
             mask        = masks[jdx]     if masks else None
@@ -509,12 +521,12 @@ def color_map_update(color_map, frame_number):
             for track_id, color_name in frame_track_id_colors.items():
                 if color_name in  color_map['colors']:
                     color = color_map['colors'][color_name]
-                else:
-                    color = color_map['colors']['default']
+                    color_map['tracks'][track_id] = color
+                elif color_name == 'unset':
+                    color_map['tracks'].pop(track_id,None)
+                else: # unknown color - ignore...
                     logging.error(f'Could not find {color_name} in map! Using default color {color}')
 
-                color_map['tracks'][track_id] = color
-        
     return color_map
 
 
@@ -542,8 +554,15 @@ def annotate_frame(frame, detections, label = None, colors_map = None):
         # Generate a color based on the track_id
         if colors_map :
             track_id_str = str(track_id) # json does not support numeric keys..
-            if track_id_str in colors_map['tracks']:
+            
+            logging.debug(f'track_id_str: {track_id_str}, class_label: {class_label}')
+            logging.debug(f'color_map.tracks : {colors_map["tracks"]}')
+
+            if track_id_str in colors_map['tracks'] :
                 color = colors_map['tracks'][track_id_str]
+            elif class_label in colors_map['tracks']:
+                color = colors_map['tracks'][class_label]
+            else :
                 color = colors_map['colors']['default']
         else:
             color = colors(track_id, True)

@@ -1,5 +1,6 @@
 cython
 python-dotenv
+pyyaml
 fastapi
 ffmpeg-python
 fiftyone

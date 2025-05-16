@@ -71,7 +71,7 @@ def cuda_device(force=False):
 cuda_device_type = cuda_device()
 
 class frameAnnotator(Annotator):
-    def centered_text(self, bbox, text, txt_color=(0,0,0), box_style=False):
+    def centered_text(self, bbox, text, txt_color=(0,0,0)):
         """
         Draw text centered in the bounding box.
 
@@ -107,7 +107,7 @@ class frameAnnotator(Annotator):
         text_y = int(center_y + offset_y)  # Adjust for OpenCV baseline behavior
 
         # Draw the text
-        self.text((text_x, text_y), text, txt_color=txt_color, box_style=box_style)
+        self.text((text_x, text_y), text, txt_color=txt_color)
 
 
 def coco_pose_keypoint_name(index):
@@ -573,13 +573,13 @@ def annotate_frame(frame, detections, label = None, colors_map = None):
             annotator.box_label(detection.bbox, detection_label, color=color)
 
             if detection.inspect:
-                annotator.centered_text(detection.bbox, ">> Inspect <<",box_style=True)
+                annotator.centered_text(detection.bbox, ">> Inspect <<")
 
     if label:
         # Define the position and text for the frame number
         position = (10, 50)  # (x, y) position on the frame
         # Draw the text on the frame
-        annotator.text(position, label,txt_color=(0,0,0),box_style=True)
+        annotator.text(position, label,txt_color=(0,0,0))
 
     # annotation is done in place not by value, but still we return frame
     return frame
@@ -594,3 +594,22 @@ def build_name( name_parts, base_name = True ):
     name = '_'.join([str(part) for part in name_parts])
 
     return name
+
+from types import SimpleNamespace
+
+def make_json_safe(obj):
+    
+    if isinstance(obj, SimpleNamespace):
+        return {k: make_json_safe(v) for k, v in vars(obj).items()}
+    elif isinstance(obj, dict):
+        return {k: make_json_safe(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [make_json_safe(v) for v in obj]
+    elif isinstance(obj, (np.integer, np.int32, np.int64)):
+        return int(obj)
+    elif isinstance(obj, (np.floating, np.float32, np.float64)):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    else:
+        return obj

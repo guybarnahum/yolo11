@@ -7,6 +7,9 @@ torch
 torchvision
 torchreid
 
+# Onnx inference - we train in notebooks
+onnxruntime
+
 # OCR
 # PaddlePaddle, TensorBoard (Ensure Python 3.11 support) are installed beforehand 
 paddleocr

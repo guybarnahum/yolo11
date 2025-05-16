@@ -33,6 +33,7 @@ base_config = {
     }
 }
 
+
 def cfg_update_from_yaml(config, yaml_path, copy_cfg = True):
     
     logging.info(f'cfg_update_from_yaml from {yaml_path}')
@@ -57,7 +58,7 @@ def cfg_update(config, override, config_key = '', copy_cfg = True) :
     '''
     Recursively update the base config with dict values 
     '''
-    cfg = copy.deepcopy(base_config) if copy_cfg else config
+    cfg = copy.deepcopy(config) if copy_cfg else config
 
     for key, value in override.items():
 
@@ -74,11 +75,53 @@ def cfg_update(config, override, config_key = '', copy_cfg = True) :
     return cfg
 
 
-def cfg_get_base_config():
-    return base_config
+def print_config(config):
+    """
+    Print the configuration in a hierarchical, readable format.
+    
+    Args:
+        base_config (dict): Configuration dictionary to print
+    """
+    if not logging.getLogger().isEnabledFor(logging.INFO) : 
+        return
+
+    logging.info("Configuration:")
+    logging.info("-" * 40)
+    
+    for section, settings in base_config.items():
+        logging.info(f"[{section.upper()} SECTION]")
+        
+        # Handle empty or None sections
+        if not settings:
+            logging.info("  (No settings)")
+            continue
+        
+        # Print each setting with alignment
+        max_key_length = max(len(str(key)) for key in settings.keys())
+        for key, value in settings.items():
+            # Format the value representation
+            if value is None:
+                formatted_value = "(Not Set)"
+            elif isinstance(value, bool):
+                formatted_value = str(value)
+            elif isinstance(value, (int, float)):
+                formatted_value = str(value)
+            else:
+                formatted_value = f'"{value}"'
+            
+            # Align the output
+            logging.info(f"  {key:{max_key_length}} : {formatted_value}")
+    
+    logging.info("-" * 40)
+
+
+def cfg_get_base_config(copy_cfg = True):
+    cfg = copy.deepcopy(base_config) if copy_cfg else base_config
+    return cfg
     
 def cfg_init():
     cfg_update_from_yaml(base_config,'./config/default.yaml', copy_cfg = False)
-    logging.info(f'base_config: {pformat(base_config)}')
+    print_config(base_config)
+
 
 cfg_init()

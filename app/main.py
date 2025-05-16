@@ -48,8 +48,9 @@ from fastapi import BackgroundTasks, FastAPI, Query
 import fiftyone as fo
 
 from pprint import pformat, pprint
-from config import cfg_update, cfg_get_base_config, cfg_update_from_yaml
+from config import cfg_update, cfg_get_base_config, cfg_update_from_yaml, print_config
 
+import json
 import os
 import sys
 import time
@@ -65,6 +66,7 @@ from trackers.deepsort.tracker import setup as deepsort_setup
 from utils import build_name, setup_model
 from utils import annotate_frame, color_map_init, color_map_update
 from utils import print_detections, print_detection, print_profiler_stats
+from utils import make_json_safe
 
 from cvat import cvat_init, cvat_add_frame, cvat_add_frame_to_manifest, cvat_save
 from evaluation.groundtruth import gt_load_mot
@@ -99,6 +101,18 @@ def process_one_image( model_path, input_path, output_path, conf=None):
 
     im0_rgb, detections = process_one_frame(  im0_rgb, detect_model)
  
+    # Enqueue detections that need further inspection
+    features = []
+
+    for detection in detections:
+        if detection.inspect:
+            detection_features = inspect( detection, frame=im0_rgb, video_path=input_path)
+            if detection_features:
+                features.extend(detection_features)
+                
+    print_detections( features )
+    detections.extend(features)
+
     label = f" {model_label} "
     annotate_frame(im0_rgb, detections, label=label)
     # Convert the annotated image back to BGR for saving with OpenCV
@@ -186,10 +200,14 @@ def process_video( cfg, input_path, output_path ):
 
     # Frame calculations
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    start_frame  = int(start_ms * fps / 1000) if start_ms else 0   
-    end_frame    = int(end_ms * fps / 1000) if end_ms else (total_frames - 1)
-
-    frames_to_process = end_frame - start_frame
+    start_frame  = int(start_ms * fps / 1000) if start_ms else 0
+    end_frame    = int(end_ms   * fps / 1000) if end_ms   else (total_frames - 1)
+    
+    # Clip to [0 .. total_frames]
+    end_frame    = max(0, min(total_frames, end_frame  ))
+    start_frame  = max(0, min(total_frames, start_frame))
+    
+    frames_to_process = max(end_frame - start_frame, 0)
     progress_bar = tqdm(total=frames_to_process)
     one_percent  = int(frames_to_process / 100) + 1
 
@@ -487,7 +505,7 @@ async def process_image_endpoint(
     perf: Optional[bool] = False
     ):
 
-    profiler = cProfile.Profile() if profile else None
+    profiler = cProfile.Profile() if perf else None
     if profiler:
         profiler.enable()
 
@@ -495,7 +513,10 @@ async def process_image_endpoint(
     error = None
 
     try:
+        
         detections = process_one_image( model_path, input_path, output_path, conf=conf)
+        detections = make_json_safe( detections )
+
     except Exception as e:
         error = str(e)
 
@@ -503,7 +524,7 @@ async def process_image_endpoint(
         profiler.disable()
         print_profiler_stats(profiler)
 
-    return {"detections": detections, "error": error}
+    return {"detections": json.dumps(detections), "error": error}
 
 
 @app.get("/process")
@@ -554,7 +575,6 @@ async def process_video_in_background_endpoint(
         'track'  :{}
     }
 
-    
     if output_path  : cfg_params['video']['output_path' ] = output_path
     if dataset_path : cfg_params['video']['dataset_path'] = dataset_path
     if start_ms     : cfg_params['video']['start_ms'    ] = start_ms
@@ -570,8 +590,7 @@ async def process_video_in_background_endpoint(
     if embedder_wts : cfg_params['track']['embedder_wts'] = embedder_wts
 
     cfg_params = cfg_update(base_cfg,cfg_params, copy_cfg = False )
-
-    pprint(cfg_params)
+    print_config(cfg_params)
 
     # Ensure the output directory exists
     output_path = cfg_params['video']['output_path' ]

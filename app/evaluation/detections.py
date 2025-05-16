@@ -118,7 +118,7 @@ class DetectionQualityEvaluator:
         
         # <--- need to debug this
         for idx in unmatched_preds:
-            logging.info(f'debug this -> unmatched_preds: idx:{idx}')
+            logging.warning(f'🐞 unmatched_preds: idx:{idx}')
             print_detection( detections[idx] )
             
         return matched_pairs, unmatched_preds, unmatched_truths, preds_num

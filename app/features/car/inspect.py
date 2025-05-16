@@ -2,7 +2,7 @@ import cv2
 import logging
 from types import MethodType
 from utils import setup_model, cuda_device, flatten_results, print_detections, annotate_frame, annotate_frame_text
-from .pose import detect_pose_from_bbox, pose_car_yaw
+from .pose import pose_car_yaw
 
 license_plate_model,_ = setup_model('./models/license_plate_detector.pt')
 
@@ -142,7 +142,7 @@ def should_inspect(detection):
     '''
     Criteria for inspection 
     '''
-    return detection.area > 400 * 400
+    return detection.area > 224 * 224
 
 
 def inspect(car_detection, frame, video_path):
@@ -164,7 +164,7 @@ def inspect(car_detection, frame, video_path):
     
     if yaw:
         conf = round(conf,3)
-        yaw_label = f'yaw:{yaw},{conf}'
+        yaw_label = f'yaw:{yaw},{conf:.03f}'
     
         car_detection.detail = yaw_label
 
@@ -176,17 +176,18 @@ def inspect(car_detection, frame, video_path):
         logging.warning(f'Could not predict car yaw - (yaw:{yaw},conf:{conf})')
 
     # License Plate(s)
-    results = license_plate_model.predict( source=car_frame, verbose=False, device=device )
+    results = license_plate_model.predict( source=car_frame, verbose=False, device=device, conf=0.1 )
     lp_detections = []
 
     best_ocr_score = 0.0
     best_ocr_text  = None
 
-    if len(results[0].boxes):
+    if results and len(results[0].boxes):
 
         # Offset detection back to original frame from car frame
         lp_detections = flatten_results(results, frame_number=car_detection.frame_number, offset_x=x1, offset_y=y1)
-    
+        print(lp_detections)
+
         for lp in lp_detections:
             
             lp.name     = "license_plate"

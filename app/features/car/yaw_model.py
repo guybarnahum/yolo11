@@ -10,7 +10,8 @@ from torchvision.models import ResNet18_Weights
 from torchvision.models import mobilenet_v3_large
 
 import torch.nn.functional as F
-from torchvision.models import mobilenet_v2
+# from torchvision.models import resnet50, efficientnet_b3,EfficientNet_B3_Weights
+from torchvision.models import efficientnet_b0, EfficientNet_B0_Weights
 
 from utils import cuda_device
 
@@ -20,14 +21,25 @@ class CarYawEstimator(nn.Module):
     def __init__(self, num_bins=8):
         super(CarYawEstimator, self).__init__()
         # Load pretrained MobileNetV2
-        self.backbone = mobilenet_v2(weights="IMAGENET1K_V1")
+   
+        self.backbone = efficientnet_b0(weights='IMAGENET1K_V1')
+        #weights=EfficientNet_B3_Weights.IMAGENET1K_V1)# resnet50(weights="IMAGENET1K_V1")
 
-        # Replace classifier with custom head
-        in_features = self.backbone.classifier[-1].in_features
-        self.backbone.classifier = nn.Sequential(
-            nn.Dropout(p=0.2),
-            nn.Linear(in_features, num_bins)
-        )
+        if hasattr(self.backbone, 'classifier'):
+            in_features = self.backbone.classifier[-1].in_features
+            self.backbone.classifier =  nn.Sequential(
+                                        nn.Dropout(p=0.2),
+                                        nn.Linear(in_features, num_bins)
+                                        )
+
+        elif hasattr(self.backbone, 'fc'):
+            in_features = self.backbone.fc.in_features
+            self.backbone.fc =  nn.Sequential(
+                                nn.Dropout(p=0.2),
+                                nn.Linear(in_features, num_bins)
+                                )
+        else:
+            raise AttributeError("Backbone model does not have a recognizable final classification layer")
 
         # Define bin centers (in degrees)
         self.bin_centers = torch.tensor([
@@ -101,6 +113,7 @@ def setup_yaw_model(model_wts_path=None):
     if model_wts_path : 
         try:
             yaw_model.load_state_dict(torch.load(model_wts_path, map_location=device))
+            logging.info(f'car_yaw_model loaded from {model_wts_path}')
         except Exception as e:
             logging.error(f'🚨 setup_yaw_model error - {str(e)}')
             # continue without weights...
@@ -108,7 +121,6 @@ def setup_yaw_model(model_wts_path=None):
     yaw_model  = yaw_model.to(device)
     yaw_model.eval() # Freeze the entire model (if no training is allowed)
 
-    logging.info(f'car_yaw_model loaded from {model_wts_path}')
     return yaw_model
 
 car_yaw_wts_path = "./models/torch/yaw_model_weights.pth"
@@ -176,59 +188,56 @@ class CarYawDataset(Dataset):
         
         return image, angle
 
+
 # Consider circular distance instead of linear
 def angle_distance(pred, true):
     diff = abs(pred - true)
     return min(diff, 360 - diff)
 
 
-def compute_loss(predictions, target_bins):
-    '''
-        Custom loss function that handles circular nature of angles
-        predictions: tensor of shape (batch_size, num_bins)
-        targets: tensor of shape (batch_size,) containing bin indices
-    '''
+def compute_smoothed_targets(target_bins, num_bins=8, sigma=0.5):
+    """
+    For each target bin, create a soft target distribution using a circular Gaussian.
+    :param target_bins: Tensor of shape (batch_size,) with integer bin indices.
+    :param num_bins: Number of bins (default=8).
+    :param sigma: Standard deviation for Gaussian smoothing.
+    :return: Tensor of shape (batch_size, num_bins) with soft targets.
+    """
+    batch_size = target_bins.size(0)
+    targets = torch.zeros(batch_size, num_bins, device=target_bins.device)
     
-    # Consider adding weights to handle class imbalance
-    weights = torch.ones(8).to(device)  # Modify based on class distribution
-    ce_loss = F.cross_entropy(predictions, target_bins, weight=weights)
+    bins = torch.arange(num_bins, device=target_bins.device).float()
+    for i in range(batch_size):
+        true_bin = target_bins[i].item()
+        # Compute circular distance for each bin index:
+        dist = torch.min(torch.abs(bins - true_bin), num_bins - torch.abs(bins - true_bin))
+        # Apply Gaussian kernel:
+        weights = torch.exp(-0.5 * (dist / sigma) ** 2)
+        targets[i] = weights / weights.sum()  # Normalize to sum to 1
+    return targets
 
-    # Standard cross-entropy loss
-    # ce_loss = F.cross_entropy(predictions, target_bins)
+def compute_loss_smoothed(predictions, target_bins, num_bins=8, sigma=0.5, alpha=0.5):
+    """
+    Computes a combined loss that uses KL divergence with smoothed targets.
+    :param predictions: Tensor of shape (batch_size, num_bins).
+    :param target_bins: Tensor of shape (batch_size,) with integer bin indices.
+    :param num_bins: Number of bins.
+    :param sigma: Gaussian smoothing parameter.
+    :param alpha: Weighting factor for the KL divergence part.
+    """
+    # Get smoothed target distributions
+    smoothed_targets = compute_smoothed_targets(target_bins, num_bins=num_bins, sigma=sigma)
     
-    # Add circular consistency loss
-    softmax_preds = F.softmax(predictions, dim=1)
-    batch_size = predictions.size(0)
-    num_bins = predictions.size(1)
+    # Standard cross-entropy loss (with one-hot targets)
+    ce_loss = F.cross_entropy(predictions, target_bins)
     
-    # Calculate angular difference between adjacent bins
-    circular_loss = 0
-    for i in range(num_bins):
-        next_bin = (i + 1) % num_bins
-        diff = torch.abs(softmax_preds[:, i] - softmax_preds[:, next_bin])
-        circular_loss += diff.mean()
+    # KL divergence between the softmax predictions and the smoothed targets.
+    log_softmax_preds = F.log_softmax(predictions, dim=1)
+    kl_loss = F.kl_div(log_softmax_preds, smoothed_targets, reduction='batchmean')
     
-    # Combine losses
-    total_loss = ce_loss + 0.1 * circular_loss
+    # Combine losses (adjust alpha as a hyperparameter)
+    total_loss = ce_loss + alpha * kl_loss
     return total_loss
-
-def train_step(model, optimizer, images, angles):
-    optimizer.zero_grad()
-    
-    # Convert target angles to bins
-    target_bins = angle_to_bin_vectorized(angles)
-    
-    # Forward pass
-    predictions = model(images)
-    
-    # Compute loss
-    loss = compute_loss(predictions, target_bins)
-    
-    # Backward pass
-    loss.backward()
-    optimizer.step()
-    
-    return loss.item()
 
 
 def validate(model, dataloader):
@@ -246,14 +255,14 @@ def validate(model, dataloader):
             # Convert target angles to bins
             target_bins = angle_to_bin_vectorized(angles)
     
-            outputs = model(images)
-            loss = compute_loss(outputs, target_bins)
+            predictions = model(images)
+            loss = compute_loss_smoothed(predictions, target_bins)
             
             total_loss += loss.item()
             
             # Calculate accuracy
             # Convert bins to angles and compare with ground truth
-            probs = F.softmax(outputs, dim=1)
+            probs = F.softmax(predictions, dim=1)
             predicted_bins = torch.argmax(probs, dim=1)
             predicted_angles = [bin_to_angle(bin_idx.item()) for bin_idx in predicted_bins]
             total += len(angles)
@@ -272,6 +281,9 @@ def train_one_epoch(model, optimizer, dataloader):
     correct = 0
     total = 0
     # criterion = nn.CrossEntropyLoss()
+    images_count = len(dataloader.dataset)
+    one_percent  = int ( 1 + (images_count) / 100) 
+    image_ix = 0
     
     for images, angles in dataloader:
         images = images.to(device)
@@ -280,9 +292,9 @@ def train_one_epoch(model, optimizer, dataloader):
         target_bins = angle_to_bin_vectorized(angles)
    
         optimizer.zero_grad()
-        outputs = model(images)
+        predictions = model(images)
         
-        loss = compute_loss(outputs, target_bins)
+        loss = compute_loss_smoothed(predictions, target_bins)
         loss.backward()
         optimizer.step()
         
@@ -290,12 +302,16 @@ def train_one_epoch(model, optimizer, dataloader):
         
         # Calculate training accuracy
         # Convert bins to angles and compare with ground truth
-        probs = F.softmax(outputs, dim=1)
+        probs = F.softmax(predictions, dim=1)
         predicted_bins = torch.argmax(probs, dim=1)
         predicted_angles = [bin_to_angle(bin_idx.item()) for bin_idx in predicted_bins]
         total += len(angles)
         correct += sum(1 for pred, true in zip(predicted_angles, angles) 
               if angle_distance(pred, true) < 15)
+
+        # Primitive progress indicator
+        if image_ix % one_percent == 0: print('.')
+        image_ix += 1
     
     avg_loss = total_loss / len(dataloader)
     accuracy = 100 * correct / total
@@ -316,13 +332,13 @@ def train_epochs_loop(model, optimizer, train_loader, val_loader, num_epochs=30,
     
     for epoch in range(num_epochs):
         # Training phase
+        print(f"Epoch {epoch + 1}/{num_epochs}:")
         train_loss, train_acc = train_one_epoch(model, optimizer, train_loader)
         
         # Validation phase
         val_loss, val_acc = validate(model, val_loader)
         patience_msg = f', Patience: {patience_counter}' if patience_counter else ''
 
-        print(f"Epoch {epoch + 1}/{num_epochs}:")
         print(f"  Train Loss: {train_loss:.4f}, Train Accuracy: {train_acc:.2f}%{patience_msg}")
         print(f"  Val   Loss: {val_loss:.4f}, Val   Accuracy: {val_acc:.2f}%")
         
@@ -357,6 +373,10 @@ def train(  training_dataset_path   = None,
 
     global car_yaw_wts_path
     
+    print(f'training_dataset_path : {training_dataset_path}')
+    print(f'testing_dataset_path  : {testing_dataset_path}')
+    print(f'model_weights_path    : {model_weights_path}')
+    
     if not model_weights_path:
         model_weights_path = car_yaw_wts_path 
 
@@ -384,6 +404,7 @@ def train(  training_dataset_path   = None,
 
     if not train_dataloader and not test_dataloader:
         logging.error(f'🚨 train : either training_dataset_path or testing_dataset_path are needed, not supplied')
+        return
 
     if not train_dataloader:
         logging.info(f'Evaluating model with {testing_dataset_path}')
@@ -391,13 +412,33 @@ def train(  training_dataset_path   = None,
         print(f"Loss: {val_loss:.4f}, Accuracy: {val_acc:.2f}%")
         return 
 
-    # Freeze feature extractor layers?
-    for param in yaw_model.backbone.features.parameters():
-        param.requires_grad = freeze_features_layers  # Freeze feature layers
-
+    print(f'num_epochs : {num_epochs}, freeze_features_layers : {freeze_features_layers}')
+    
+    # Assume freeze_features_layers is a boolean flag
     if freeze_features_layers:
-        optimizer = torch.optim.Adam(yaw_model.backbone.classifier.parameters(), lr=1e-4)
+        # For MobileNet, VGG, or similar architectures:
+        if hasattr(yaw_model.backbone, 'features'):
+            # Freeze all feature extractor layers
+            for param in yaw_model.backbone.features.parameters():
+                param.requires_grad = False
+            # Optimize only the classifier parameters
+            optimizer = torch.optim.Adam(yaw_model.backbone.classifier.parameters(), lr=1e-4)
+        
+        # For ResNet-style models:
+        elif hasattr(yaw_model.backbone, 'fc'):
+            # Freeze all layers except those in the final fc layer
+            for name, param in yaw_model.backbone.named_parameters():
+                if "fc" not in name:
+                    param.requires_grad = False
+            # Optimize only the fc layer parameters
+            optimizer = torch.optim.Adam(yaw_model.backbone.fc.parameters(), lr=1e-4)
+        
+        else:
+            raise AttributeError("Backbone model does not have 'features' or 'fc' attribute!")
     else:
+        # If not freezing, ensure all parameters are trainable and optimize the whole model.
+        for param in yaw_model.parameters():
+            param.requires_grad = True
         optimizer = torch.optim.Adam(yaw_model.parameters(), lr=0.001)
 
     # epoch loop

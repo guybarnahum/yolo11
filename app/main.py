@@ -76,7 +76,7 @@ load_dotenv()
 app = FastAPI()
 
 
-def process_one_image( model_path, input_path, output_path, conf=None):
+def process_one_image( model_path, input_path, output_path, conf=None, inspects=None):
 
     model_label = build_name( [ 'model', model_path ] )
     input_base, input_ext = os.path.splitext(input_path)
@@ -105,7 +105,10 @@ def process_one_image( model_path, input_path, output_path, conf=None):
     features = []
 
     for detection in detections:
-        if detection.inspect:
+
+        do_inspect = detection.inspect or (inspects and detection.name in inspects)
+
+        if do_inspect:
             detection_features = inspect( detection, frame=im0_rgb, video_path=input_path)
             if detection_features:
                 features.extend(detection_features)
@@ -136,6 +139,7 @@ def process_video( cfg, input_path, output_path ):
     end_ms      = cfg['video']['end_ms'     ]
     cvat        = cfg['video']['cvat'       ]
     perf        = cfg['video']['perf'       ]
+    inspects    = cfg['video']['inspects'   ]
 
     model_path  = cfg['detect']['model_path']
     tile        = cfg['detect']['tile'      ]
@@ -255,7 +259,12 @@ def process_video( cfg, input_path, output_path ):
         features = []
 
         for detection in detections:
-            if detection.inspect:
+            
+            do_inspect = detection.inspect or (inspects and detection.name in inspects)
+            
+            logging.info(f'detection {detection.name} inspects : {inspects}' )
+
+            if do_inspect:
                 detection_features = inspect( detection, frame=im0, video_path=input_path)
                 if detection_features:
                     features.extend(detection_features)
@@ -502,7 +511,8 @@ async def process_image_endpoint(
     input_path: str,
     output_path: str,
     conf: Optional[float] = None,   # minimum conf for detection 
-    perf: Optional[bool] = False
+    perf: Optional[bool] = False,
+    inspects: Optional[str] = None
     ):
 
     profiler = cProfile.Profile() if perf else None
@@ -514,7 +524,7 @@ async def process_image_endpoint(
 
     try:
         
-        detections = process_one_image( model_path, input_path, output_path, conf=conf)
+        detections = process_one_image( model_path, input_path, output_path, conf=conf, inspects=inspects)
         detections = make_json_safe( detections )
 
     except Exception as e:
@@ -545,7 +555,8 @@ async def process_video_in_background_endpoint(
     end: Optional[int] = None,
     conf: Optional[float] = None,  # minimum conf for detection 
     cvat: Optional[bool] = False,  
-    perf: Optional[bool] = False
+    perf: Optional[bool] = False,
+    inspects: Optional[str] = None
     ):
 
     '''
@@ -581,6 +592,7 @@ async def process_video_in_background_endpoint(
     if end_ms       : cfg_params['video']['end_ms'      ] = end_ms
     if cvat         : cfg_params['video']['cvat'        ] = cvat
     if perf         : cfg_params['video']['perf'        ] = perf
+    if inspects     : cfg_params['video']['inspects'    ] = inspects
 
     if model_path   : cfg_params['detect']['model_path' ] = model_path
     if tile         : cfg_params['detect']['tile'       ] = tile
